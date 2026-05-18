@@ -189,7 +189,7 @@ async def run(state: StoryState) -> AgentResult:
         tool_name=_TOOL_NAME,
         tool_description=_TOOL_DESCRIPTION,
         tool_schema=_TOOL_SCHEMA,
-        max_tokens=1200,
+        max_tokens=2048,
     )
 
     confidence_score, signals = _compute_confidence(agent1_data, agent2_data, agent3_data, extracted)

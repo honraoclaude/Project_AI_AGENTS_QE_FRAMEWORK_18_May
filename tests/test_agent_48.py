@@ -1,0 +1,291 @@
+"""Tests for Agent 48 — Rollback Readiness (Augmented Script)."""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.agents.release.agent_48_rollback_readiness import (
+    _assess_rollback,
+    _compute_confidence,
+    run,
+)
+from src.core.schemas import initial_story_state
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+AGENT13_CLEAN = {"has_destructive_changes": False, "dependency_depth": 0}
+AGENT13_DESTRUCTIVE = {"has_destructive_changes": True, "dependency_depth": 0}
+AGENT13_DEEP_DEPS = {"has_destructive_changes": False, "dependency_depth": 4}
+AGENT13_DESTRUCTIVE_SHALLOW = {"has_destructive_changes": True, "dependency_depth": 1}
+AGENT13_DESTRUCTIVE_MEDIUM = {"has_destructive_changes": True, "dependency_depth": 2}
+AGENT13_DESTRUCTIVE_DEEP = {"has_destructive_changes": True, "dependency_depth": 3}
+
+AGENT41_PASS = {"integrity_verdict": "PASS"}
+AGENT41_FAIL = {"integrity_verdict": "FAIL"}
+
+MOCK_TRACE_LOW = {
+    "narrative": "Rollback is straightforward. No destructive changes present. Standard Copado rollback procedure applies.",
+    "rollback_concern": "none",
+}
+MOCK_TRACE_HIGH = {
+    "narrative": "Rollback is HIGH risk. Destructive changes with deep dependencies make reversal complex. Manual restore of deleted metadata is required.",
+    "rollback_concern": "destructive_changes",
+}
+MOCK_TRACE_MEDIUM = {
+    "narrative": "Rollback is MEDIUM risk. Destructive changes present; restore from version control needed before proceeding.",
+    "rollback_concern": "destructive_changes",
+}
+
+
+# ── Deterministic rollback assessment tests ───────────────────────────────────
+
+class TestAssessRollback:
+    def test_no_data_gives_low_risk_feasible(self):
+        feasible, risk, steps, verdict = _assess_rollback(None, None)
+        assert feasible is True
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+    def test_clean_change_gives_feasible(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        assert feasible is True
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+    def test_destructive_no_deps_gives_risky(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        assert feasible is True
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_destructive_depth_1_gives_risky(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_SHALLOW, AGENT41_PASS)
+        assert feasible is True
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_destructive_depth_2_gives_not_feasible(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_MEDIUM, AGENT41_PASS)
+        assert feasible is False
+        assert risk == "HIGH"
+        assert verdict == "NOT_FEASIBLE"
+
+    def test_destructive_depth_3_gives_not_feasible(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_DEEP, AGENT41_PASS)
+        assert feasible is False
+        assert risk == "HIGH"
+        assert verdict == "NOT_FEASIBLE"
+
+    def test_deep_deps_no_destructive_gives_risky(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DEEP_DEPS, AGENT41_PASS)
+        assert feasible is True
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_depth_3_no_destructive_gives_risky(self):
+        data = {"has_destructive_changes": False, "dependency_depth": 3}
+        feasible, risk, steps, verdict = _assess_rollback(data, None)
+        assert feasible is True
+        assert verdict == "RISKY"
+        assert risk == "MEDIUM"
+
+    def test_depth_2_no_destructive_gives_feasible(self):
+        data = {"has_destructive_changes": False, "dependency_depth": 2}
+        feasible, risk, steps, verdict = _assess_rollback(data, None)
+        assert feasible is True
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+    def test_steps_always_include_base_step(self):
+        _, _, steps, _ = _assess_rollback(AGENT13_CLEAN, None)
+        assert any("Copado" in s for s in steps)
+
+    def test_destructive_adds_restore_steps(self):
+        _, _, steps, _ = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        assert any("deleted metadata" in s.lower() for s in steps)
+        assert any("data integrity" in s.lower() for s in steps)
+
+    def test_deep_deps_adds_dependency_review_step(self):
+        _, _, steps, _ = _assess_rollback(AGENT13_DEEP_DEPS, AGENT41_PASS)
+        assert any("dependency" in s.lower() for s in steps)
+
+    def test_clean_change_has_minimal_steps(self):
+        _, _, steps, _ = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        assert len(steps) == 1
+
+    def test_destructive_deep_has_most_steps(self):
+        _, _, steps_max, _ = _assess_rollback(AGENT13_DESTRUCTIVE_DEEP, AGENT41_PASS)
+        _, _, steps_min, _ = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        assert len(steps_max) > len(steps_min)
+
+    def test_returns_tuple_of_four(self):
+        result = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        assert len(result) == 4
+        feasible, risk, steps, verdict = result
+        assert isinstance(feasible, bool)
+        assert isinstance(risk, str)
+        assert isinstance(steps, list)
+        assert isinstance(verdict, str)
+
+    def test_feasible_is_false_only_for_high_risk(self):
+        _, _, _, verdict_high = _assess_rollback(AGENT13_DESTRUCTIVE_MEDIUM, AGENT41_PASS)
+        _, _, _, verdict_medium = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        assert verdict_high == "NOT_FEASIBLE"
+        assert verdict_medium == "RISKY"
+
+
+# ── Confidence scoring tests ──────────────────────────────────────────────────
+
+class TestConfidenceScoring:
+    def test_both_sources_gives_high_score(self):
+        score, _ = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert score >= 65
+
+    def test_metadata_available_adds_confidence(self):
+        score_with, _ = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        score_without, _ = _compute_confidence(None, None)
+        assert score_with > score_without
+
+    def test_no_metadata_reduces_confidence(self):
+        score_no_meta, _ = _compute_confidence(None, AGENT41_PASS)
+        score_with_meta, _ = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert score_with_meta > score_no_meta
+
+    def test_change_set_data_adds_confidence(self):
+        score_with, _ = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        score_without, _ = _compute_confidence(AGENT13_CLEAN, None)
+        assert score_with > score_without
+
+    def test_score_never_exceeds_92(self):
+        score, _ = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert score <= 92
+
+    def test_score_never_below_20(self):
+        score, _ = _compute_confidence(None, None)
+        assert score >= 20
+
+    def test_returns_signals_dict(self):
+        _, signals = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert isinstance(signals, dict)
+
+
+# ── Integration tests ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestAgentRun:
+    async def test_returns_agent_result(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_CLEAN}
+        state["agent_results"]["41"] = {"data": AGENT41_PASS}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.agent_id == 48
+        assert result.agent_name == "Rollback Readiness"
+        assert result.confidence.tier == "B"
+
+    async def test_data_has_required_downstream_keys(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        for key in ["rollback_feasible", "rollback_risk", "rollback_steps", "rollback_verdict"]:
+            assert key in result.data
+
+    async def test_feasible_when_clean_change(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_CLEAN}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.data["rollback_verdict"] == "FEASIBLE"
+        assert result.data["rollback_feasible"] is True
+        assert result.data["rollback_risk"] == "LOW"
+
+    async def test_not_feasible_when_destructive_and_deep(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_DESTRUCTIVE_MEDIUM}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_HIGH
+            result = await run(state)
+
+        assert result.data["rollback_verdict"] == "NOT_FEASIBLE"
+        assert result.data["rollback_feasible"] is False
+        assert result.data["rollback_risk"] == "HIGH"
+
+    async def test_risky_when_destructive_shallow(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_DESTRUCTIVE}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_MEDIUM
+            result = await run(state)
+
+        assert result.data["rollback_verdict"] == "RISKY"
+        assert result.data["rollback_risk"] == "MEDIUM"
+
+    async def test_rollback_concern_propagated(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_DESTRUCTIVE}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_MEDIUM
+            result = await run(state)
+
+        assert result.data["rollback_concern"] == "destructive_changes"
+
+    async def test_uses_fast_model(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_steps_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["rollback_steps"], list)
+        assert len(result.data["rollback_steps"]) >= 1
+
+    async def test_no_upstream_data_gives_feasible(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.data["rollback_verdict"] == "FEASIBLE"
+
+    async def test_escalation_flag_set_correctly(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_CLEAN}
+        state["agent_results"]["41"] = {"data": AGENT41_PASS}
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.confidence.escalated, bool)

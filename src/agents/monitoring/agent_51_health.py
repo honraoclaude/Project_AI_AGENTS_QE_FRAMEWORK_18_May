@@ -31,10 +31,27 @@ CONFIDENCE_DRIFT_ALERT = 0.15  # alert if avg confidence dropped >15 points vs 3
 HUNG_AGENT_MINUTES = 10        # alert if an agent hasn't completed a run in >10 min during active sprint
 
 AGENT_NAMES: dict[int, str] = {
+    # Refinement
     1: "Story Intent", 2: "INVEST Quality", 3: "FCA Classifier",
     4: "Consumer Duty Mapping", 5: "AC Generator", 6: "Test Design Strategy",
     7: "Data Need", 8: "Dependency Mapping", 9: "Risk Anticipation",
-    51: "Agent Health Monitor",
+    # Development
+    10: "AC Compliance", 11: "Branch Tracer", 12: "Apex Coverage",
+    13: "Metadata Dependency", 14: "Code Quality", 15: "Apex Security",
+    16: "Bulk Quality", 17: "SFDX Validator", 18: "Component Attribution",
+    19: "BDD Gherkin Writer", 20: "Performance Risk", 21: "Test Data Architect",
+    22: "Sandbox State", 23: "Story-to-Code Tracer",
+    # Testing
+    24: "Test Strategy Validator", 25: "Test Env Provisioner", 26: "CRT Scenario Designer",
+    27: "CRT Execution", 28: "CRT Self-Heal Reviewer", 29: "UAT Test Case Generator",
+    30: "FCA Scenario Agent", 31: "Financial Data Integrity", 32: "Regression Risk Assessor",
+    33: "Test Coverage Analyser", 34: "Defect Triage", 35: "Root Cause Analyser",
+    36: "UAT Coordination", 37: "Performance Test", 38: "Flaky Test Hunter",
+    # Release
+    39: "Release Readiness", 40: "Release Composer", 41: "Change Set Integrity",
+    42: "Dry Run", 43: "Smoke on Staging", 44: "FCA Evidence Pack",
+    45: "Go/No-Go Coordinator", 46: "Production Validation", 47: "Release Notes Writer",
+    48: "Rollback Readiness", 49: "Post-Release Monitor", 50: "Release Retrospective",
 }
 
 

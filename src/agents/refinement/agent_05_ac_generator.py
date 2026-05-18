@@ -95,11 +95,11 @@ _AC_CLAUSE_SCHEMA = {
 _TOOL_SCHEMA = {
     "type": "object",
     "required": [
-        "ac_clauses",
         "generation_mode",
         "coverage_assessment",
         "gaps_filled",
         "remaining_gaps",
+        "ac_clauses",
     ],
     "properties": {
         "ac_clauses": {
@@ -229,7 +229,7 @@ async def run(state: StoryState) -> AgentResult:
         tool_name=_TOOL_NAME,
         tool_description=_TOOL_DESCRIPTION,
         tool_schema=_TOOL_SCHEMA,
-        max_tokens=2000,
+        max_tokens=4096,
     )
 
     ac_clauses = extracted.get("ac_clauses", [])

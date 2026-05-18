@@ -13,3 +13,4 @@ htmlcov/
 .coverage
 *.parquet
 audit_exports/
+validation/outputs/

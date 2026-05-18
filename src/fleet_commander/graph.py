@@ -11,14 +11,17 @@ from langgraph.graph import END, START, StateGraph
 
 from src.core.config import settings
 from src.core.schemas import StoryState, initial_story_state
+from src.fleet_commander.phases.development import run_development_phase
 from src.fleet_commander.phases.refinement import build_refinement_subgraph
+from src.fleet_commander.phases.release import run_release_phase
+from src.fleet_commander.phases.testing import run_testing_phase
 
 
 def build_fleet_commander(checkpointer: AsyncPostgresSaver) -> StateGraph:
     """
     Build the Fleet Commander graph with all phase subgraphs wired.
-    Wave 1: Refinement subgraph only. Development/Testing/Release are stubs
-    that will be filled in Waves 2–4.
+    Refinement runs as a LangGraph subgraph (with interrupt support for G1 sign-off).
+    Development, Testing, and Release run as async node functions.
     """
     main_graph = StateGraph(StoryState)
 
@@ -26,10 +29,9 @@ def build_fleet_commander(checkpointer: AsyncPostgresSaver) -> StateGraph:
     refinement_graph = build_refinement_subgraph().compile()
     main_graph.add_node("refinement", refinement_graph)
 
-    # Wave 2–4 stubs — added here so the routing logic is in place
-    main_graph.add_node("development", _development_stub)
-    main_graph.add_node("testing", _testing_stub)
-    main_graph.add_node("release", _release_stub)
+    main_graph.add_node("development", _run_development)
+    main_graph.add_node("testing", _run_testing)
+    main_graph.add_node("release", _run_release)
     main_graph.add_node("complete", _mark_complete)
     main_graph.add_node("blocked", _mark_blocked)
 
@@ -60,19 +62,31 @@ def _route_after_phase(state: StoryState) -> str:
     return state["current_phase"].lower()
 
 
-async def _development_stub(state: StoryState) -> StoryState:
-    """Wave 2 placeholder — Development phase agents and gates G2–G4."""
-    return {**state, "current_phase": "TESTING"}
+async def _run_development(state: StoryState) -> StoryState:
+    """Development phase — Agents 10–23, Gates G2–G4."""
+    try:
+        state = await run_development_phase(state)
+        return {**state, "current_phase": "TESTING"}
+    except Exception as exc:
+        return {**state, "current_phase": "BLOCKED", "block_reason": str(exc)}
 
 
-async def _testing_stub(state: StoryState) -> StoryState:
-    """Wave 3 placeholder — Testing phase agents and gates G5–G6."""
-    return {**state, "current_phase": "RELEASE"}
+async def _run_testing(state: StoryState) -> StoryState:
+    """Testing phase — Agents 24–38, Gates G5–G6."""
+    try:
+        state = await run_testing_phase(state)
+        return {**state, "current_phase": "RELEASE"}
+    except Exception as exc:
+        return {**state, "current_phase": "BLOCKED", "block_reason": str(exc)}
 
 
-async def _release_stub(state: StoryState) -> StoryState:
-    """Wave 4 placeholder — Release phase agents and gates G7–G12."""
-    return {**state, "current_phase": "COMPLETE"}
+async def _run_release(state: StoryState) -> StoryState:
+    """Release phase — Agents 39–50, Gates G7–G12."""
+    try:
+        state = await run_release_phase(state)
+        return {**state, "current_phase": "COMPLETE"}
+    except Exception as exc:
+        return {**state, "current_phase": "BLOCKED", "block_reason": str(exc)}
 
 
 async def _mark_complete(state: StoryState) -> StoryState:

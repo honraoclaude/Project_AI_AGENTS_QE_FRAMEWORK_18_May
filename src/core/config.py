@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     sf_security_token: SecretStr = SecretStr("")
     sf_domain: str = "test"
 
+    # Copado (Development phase — branch tracing, coverage, metadata)
+    copado_url: str = ""
+    copado_access_token: SecretStr = SecretStr("")
+
     # Sign-off service
     signoff_base_url: str = "http://localhost:8000"
     signoff_hmac_secret: SecretStr = SecretStr("change-me")

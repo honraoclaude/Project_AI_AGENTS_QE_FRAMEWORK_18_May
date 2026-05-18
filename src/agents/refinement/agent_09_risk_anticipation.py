@@ -88,12 +88,12 @@ _TOOL_DESCRIPTION = (
 _TOOL_SCHEMA = {
     "type": "object",
     "required": [
-        "risk_register",
         "critical_risk_count",
         "high_risk_count",
         "overall_risk_level",
         "risk_summary",
         "recommended_actions",
+        "risk_register",
     ],
     "properties": {
         "risk_register": {

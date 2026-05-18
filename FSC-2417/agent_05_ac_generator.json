@@ -1,0 +1,285 @@
+{
+  "agent_id": 5,
+  "agent_name": "AC Generator",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 46784,
+  "what": "AC generation for FSC-2417: mode=supplemented_existing, clauses=12 (happy=True, error=True, edge=True, regulatory=True)",
+  "why": "AC Generator supplemented/validated acceptance criteria for a HIGH-FCA story. 8 gap(s) filled; 4 gap(s) remain.",
+  "data": {
+    "ac_clauses": [
+      {
+        "scenario": "Scenario: View consolidated suitability score for a fully assessed client",
+        "scenario_type": "happy_path",
+        "test_category": "AUTOMATION_CANDIDATE",
+        "fca_relevant": true,
+        "given": [
+          "Given a client has a Suitability__c record with status = 'Complete' and a linked RiskProfile__c with risk_level = 'Moderate'",
+          "And the client's investment objectives are recorded on the Suitability__c record with objectives_score__c populated",
+          "And the client's FinancialAccount has financial_circumstances_last_updated__c within the last 12 months"
+        ],
+        "when": [
+          "When the Wealth Manager opens the suitability-dashboard LWC on the FSC Client 360 page"
+        ],
+        "then": [
+          "Then the FinancialAccount.ConsolidatedSuitabilityScore__c value is displayed prominently as a numeric score between 0 and 100",
+          "And a dimension breakdown is shown: Risk Profile 40%, Investment Objectives 35%, Financial Circumstances 25%",
+          "And the date of the most recently updated Suitability__c dimension record is displayed for each dimension"
+        ]
+      },
+      {
+        "scenario": "Scenario: Automatic score recalculation on Suitability__c update via Platform Event",
+        "scenario_type": "happy_path",
+        "test_category": "FUNCTIONAL",
+        "fca_relevant": true,
+        "given": [
+          "Given a client's FinancialAccount has ConsolidatedSuitabilityScore__c = 72",
+          "And the SuitabilityScoreCalculator Apex class is active and deployed",
+          "And the suitability-dashboard LWC is open on the FSC Client 360 page for the adviser"
+        ],
+        "when": [
+          "When a Suitability__c record linked to the FinancialAccount is saved with an updated risk_classification__c value following an annual review"
+        ],
+        "then": [
+          "Then the SuitabilityScoreCalculator recalculates FinancialAccount.ConsolidatedSuitabilityScore__c within 5 seconds",
+          "And a SuitabilityScoreUpdated__e Platform Event is fired containing the new score and the FinancialAccount Id",
+          "And the suitability-dashboard LWC reflects the updated score without requiring a full page refresh"
+        ]
+      },
+      {
+        "scenario": "Scenario: Stale financial circumstances trigger a 'Requires Review' banner",
+        "scenario_type": "error_path",
+        "test_category": "UI",
+        "fca_relevant": true,
+        "given": [
+          "Given a client's FinancialAccount has financial_circumstances_last_updated__c more than 12 months in the past",
+          "And the client's Suitability__c record and RiskProfile__c are otherwise complete"
+        ],
+        "when": [
+          "When the Wealth Manager opens the suitability-dashboard LWC on the FSC Client 360 page"
+        ],
+        "then": [
+          "Then a 'Review Required' banner is displayed on the suitability-dashboard component showing the date of the last circumstances update",
+          "And the FinancialAccount.ConsolidatedSuitabilityScore__c field is shown as 'Requires Review' rather than a numeric value",
+          "And the Wealth Manager is presented with a prompt to initiate a financial circumstances review"
+        ]
+      },
+      {
+        "scenario": "Scenario: COBS 9.2 mandatory warning gate for Retail Client with low suitability score",
+        "scenario_type": "regulatory",
+        "test_category": "FUNCTIONAL",
+        "fca_relevant": true,
+        "given": [
+          "Given a client is classified as Retail Client (client_classification__c = 'Retail') under COBS 3.4 on their FinancialAccount",
+          "And FinancialAccount.ConsolidatedSuitabilityScore__c = 44 (below the 50-point threshold)",
+          "And the suitability-dashboard LWC is open on the FSC Client 360 page"
+        ],
+        "when": [
+          "When the Wealth Manager clicks 'Record Advice' on the suitability dashboard"
+        ],
+        "then": [
+          "Then a mandatory COBS 9.2 suitability warning modal is displayed before any advice record is created",
+          "And the Wealth Manager cannot proceed to record advice until they explicitly acknowledge the warning",
+          "And upon acknowledgement, a COBS_9_2_Acknowledgement__c audit record is created linked to the FinancialAccount with timestamp and adviser UserId"
+        ]
+      },
+      {
+        "scenario": "Scenario: COBS 9.2 warning is not triggered for Professional Client with low score",
+        "scenario_type": "regulatory",
+        "test_category": "FUNCTIONAL",
+        "fca_relevant": true,
+        "given": [
+          "Given a client is classified as Professional Client (client_classification__c = 'Professional') under COBS 3.4 on their FinancialAccount",
+          "And FinancialAccount.ConsolidatedSuitabilityScore__c = 38 (below the 50-point threshold)"
+        ],
+        "when": [
+          "When the Wealth Manager clicks 'Record Advice' on the suitability dashboard"
+        ],
+        "then": [
+          "Then no COBS 9.2 suitability warning modal is displayed",
+          "And the Wealth Manager proceeds to record advice without interruption",
+          "And no COBS_9_2_Acknowledgement__c record is created for this interaction"
+        ]
+      },
+      {
+        "scenario": "Scenario: Consumer Duty \u2014 suitability dashboard presents score and warnings in a clear, non-misleading format",
+        "scenario_type": "regulatory",
+        "test_category": "UI",
+        "fca_relevant": true,
+        "given": [
+          "Given a client has a fully computed FinancialAccount.ConsolidatedSuitabilityScore__c of 65",
+          "And the client is classified as Retail Client under COBS 3.4"
+        ],
+        "when": [
+          "When the Wealth Manager opens the suitability-dashboard LWC on the FSC Client 360 page"
+        ],
+        "then": [
+          "Then the consolidated score, dimension breakdown, and last-assessment dates are each labelled with plain-language descriptions visible without scrolling",
+          "And no dimension label, score value, or tooltip contains misleading or technically ambiguous text that could cause the adviser to misinterpret the client's suitability status",
+          "And the dashboard passes WCAG 2.1 AA colour-contrast requirements for all score indicators and banners (supporting Consumer Duty PS22/9 Outcome 3 \u2014 Consumer Understanding)"
+        ]
+      },
+      {
+        "scenario": "Scenario: Score calculation blocked when RiskProfile__c is absent",
+        "scenario_type": "error_path",
+        "test_category": "UNIT",
+        "fca_relevant": true,
+        "given": [
+          "Given a client's FinancialAccount has no linked RiskProfile__c record",
+          "And a Suitability__c record exists for the client with objectives and circumstances scores populated"
+        ],
+        "when": [
+          "When the SuitabilityScoreCalculator Apex class is invoked for the client's FinancialAccount"
+        ],
+        "then": [
+          "Then the SuitabilityScoreCalculator throws a SuitabilityCalculationException with message 'RiskProfile__c is required for score calculation'",
+          "And FinancialAccount.ConsolidatedSuitabilityScore__c is not updated and retains its previous value",
+          "And the suitability-dashboard LWC displays an 'Incomplete Assessment \u2014 Risk Profile Missing' error state to the Wealth Manager"
+        ]
+      },
+      {
+        "scenario": "Scenario: Score calculation blocked when investment objectives dimension is missing",
+        "scenario_type": "error_path",
+        "test_category": "UNIT",
+        "fca_relevant": true,
+        "given": [
+          "Given a client's Suitability__c record has objectives_score__c = null",
+          "And a valid RiskProfile__c and financial circumstances record exist for the client"
+        ],
+        "when": [
+          "When the SuitabilityScoreCalculator Apex class is invoked for the client's FinancialAccount"
+        ],
+        "then": [
+          "Then the SuitabilityScoreCalculator does not write a new ConsolidatedSuitabilityScore__c value",
+          "And a SuitabilityCalculationException is raised with message 'Investment objectives score is required'",
+          "And the suitability-dashboard LWC displays an 'Incomplete Assessment \u2014 Objectives Missing' error state"
+        ]
+      },
+      {
+        "scenario": "Scenario: Consolidated score boundary \u2014 minimum valid score of 0 renders correctly",
+        "scenario_type": "edge_case",
+        "test_category": "UNIT",
+        "fca_relevant": false,
+        "given": [
+          "Given all three Suitability__c dimension scores are set to their minimum permissible values",
+          "And the SuitabilityScoreCalculator is invoked for the associated FinancialAccount"
+        ],
+        "when": [
+          "When the weighted sum across risk (40%), objectives (35%), and circumstances (25%) is calculated"
+        ],
+        "then": [
+          "Then FinancialAccount.ConsolidatedSuitabilityScore__c is set to 0.00",
+          "And the suitability-dashboard LWC renders the score as '0' without null pointer or display errors",
+          "And the COBS 9.2 mandatory warning gate is triggered for any Retail Client with this score"
+        ]
+      },
+      {
+        "scenario": "Scenario: Consolidated score boundary \u2014 maximum valid score of 100 renders correctly",
+        "scenario_type": "edge_case",
+        "test_category": "UNIT",
+        "fca_relevant": false,
+        "given": [
+          "Given all three Suitability__c dimension scores are set to their maximum permissible values",
+          "And the SuitabilityScoreCalculator is invoked for the associated FinancialAccount"
+        ],
+        "when": [
+          "When the weighted sum across risk (40%), objectives (35%), and circumstances (25%) is calculated"
+        ],
+        "then": [
+          "Then FinancialAccount.ConsolidatedSuitabilityScore__c is set to 100.00",
+          "And the suitability-dashboard LWC renders the score as '100' without overflow or display errors",
+          "And no COBS 9.2 warning is triggered for a Retail Client with this score"
+        ]
+      },
+      {
+        "scenario": "Scenario: Concurrent Suitability__c updates do not produce a race condition on the consolidated score",
+        "scenario_type": "edge_case",
+        "test_category": "FUNCTIONAL",
+        "fca_relevant": true,
+        "given": [
+          "Given a client's FinancialAccount has ConsolidatedSuitabilityScore__c = 68",
+          "And two separate Suitability__c dimension records (risk and objectives) are updated simultaneously by two different system processes"
+        ],
+        "when": [
+          "When both Suitability__c save operations trigger the SuitabilityScoreCalculator within the same transaction window"
+        ],
+        "then": [
+          "Then FinancialAccount.ConsolidatedSuitabilityScore__c reflects the result of the most recently completed calculation without data corruption or partial writes",
+          "And exactly one SuitabilityScoreUpdated__e Platform Event is published per completed recalculation cycle",
+          "And no duplicate or conflicting score values are persisted on the FinancialAccount record"
+        ]
+      },
+      {
+        "scenario": "Scenario: SYSC audit trail \u2014 COBS 9.2 acknowledgement log is retrievable for compliance review",
+        "scenario_type": "regulatory",
+        "test_category": "AUTOMATION_CANDIDATE",
+        "fca_relevant": true,
+        "given": [
+          "Given a Wealth Manager has previously acknowledged a COBS 9.2 warning for a Retail Client with ConsolidatedSuitabilityScore__c = 44",
+          "And a COBS_9_2_Acknowledgement__c record was created linked to the FinancialAccount at that time"
+        ],
+        "when": [
+          "When a Compliance Officer queries the COBS_9_2_Acknowledgement__c object filtered by FinancialAccount Id"
+        ],
+        "then": [
+          "Then the acknowledgement record is returned with adviser UserId, acknowledgement timestamp, score value at time of acknowledgement, and linked FinancialAccount Id",
+          "And the record is read-only and cannot be deleted or modified by non-system profiles",
+          "And the audit log entry is available to support SYSC Senior Manager oversight and FCA compliance review"
+        ]
+      }
+    ],
+    "ac_clause_count": 12,
+    "fca_relevant_clause_count": 10,
+    "generation_mode": "supplemented_existing",
+    "coverage_assessment": {
+      "happy_path": true,
+      "error_paths": true,
+      "edge_cases": true,
+      "regulatory": true
+    },
+    "gaps_filled": [
+      "regulatory: COBS 3.4 scoping \u2014 warning correctly suppressed for Professional Client",
+      "regulatory: Consumer Duty PS22/9 Outcome 3 \u2014 clear and non-misleading dashboard presentation",
+      "error_path: SuitabilityScoreCalculator blocked when RiskProfile__c is absent",
+      "error_path: SuitabilityScoreCalculator blocked when investment objectives score is null",
+      "edge_case: boundary score \u2014 minimum value of 0 renders without errors",
+      "edge_case: boundary score \u2014 maximum value of 100 renders without errors",
+      "edge_case: concurrent Suitability__c updates do not cause race condition on ConsolidatedSuitabilityScore__c",
+      "regulatory: SYSC audit trail \u2014 COBS 9.2 acknowledgement log retrievable by Compliance Officer"
+    ],
+    "remaining_gaps": [
+      "Performance / load criteria: no NFR defined for SuitabilityScoreCalculator under bulk Suitability__c update scenarios (e.g. batch annual review processing 200+ records) \u2014 bulkification limits and governor limit behaviour are unspecified in the story",
+      "FLS / permission model: no acceptance criteria cover which profiles or permission sets can read FinancialAccount.ConsolidatedSuitabilityScore__c and COBS_9_2_Acknowledgement__c \u2014 field-level security requirements are out of scope in the current story but represent a MEDIUM-FCA gap",
+      "Platform Event delivery guarantee: no criteria specify behaviour if SuitabilityScoreUpdated__e delivery fails or is delayed beyond 5 seconds \u2014 retry logic and fallback display state on the LWC are undefined",
+      "COBS_9_2_Acknowledgement__c object definition: the story references audit logging but does not define this object's schema, RecordType, or retention policy \u2014 test data setup may be blocked until the object is formally created"
+    ],
+    "existing_ac_count": 4,
+    "fca_classification_context": "HIGH",
+    "signals": {
+      "supplemented_existing": true,
+      "clause_count": 12,
+      "full_coverage": true,
+      "regulatory_scenario_present": true,
+      "rich_description": 181,
+      "cd_obligations_covered": 5
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 92,
+    "calibration_multiplier": 1.0,
+    "final_score": 92,
+    "signals": {
+      "supplemented_existing": true,
+      "clause_count": 12,
+      "full_coverage": true,
+      "regulatory_scenario_present": true,
+      "rich_description": 181,
+      "cd_obligations_covered": 5
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:36:27.934700"
+}

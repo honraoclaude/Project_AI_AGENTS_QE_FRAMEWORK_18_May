@@ -1,0 +1,35 @@
+{
+  "agent_id": 38,
+  "agent_name": "Flaky Test Hunter",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 5792,
+  "what": "Flaky test detection for FSC-2417: 0 flaky test(s) \u2014 verdict=PASS",
+  "why": "No flaky tests detected in FSC-2417 test suite. All tests passed consistently across retry cycles with no locator drift, timing issues, or data dependency failures observed. The test suite is stable and requires no immediate stabilisation action.",
+  "data": {
+    "flaky_tests": [],
+    "flaky_count": 0,
+    "quarantine_recommended": [],
+    "flaky_verdict": "PASS",
+    "flaky_concern": "none",
+    "narrative": "No flaky tests detected in FSC-2417 test suite. All tests passed consistently across retry cycles with no locator drift, timing issues, or data dependency failures observed. The test suite is stable and requires no immediate stabilisation action.",
+    "signals": {
+      "no_tests_executed": 0,
+      "no_flaky_tests": 0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 62,
+    "calibration_multiplier": 1.0,
+    "final_score": 62,
+    "signals": {
+      "no_tests_executed": 0,
+      "no_flaky_tests": 0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:08.145252"
+}

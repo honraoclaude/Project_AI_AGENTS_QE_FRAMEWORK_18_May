@@ -1,0 +1,41 @@
+{
+  "agent_id": 19,
+  "agent_name": "BDD Gherkin Writer",
+  "phase": "Development",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 22112,
+  "what": "BDD Gherkin for FSC-2417: 0 scenario(s) generated from 4 AC(s) \u2014 verdict=INCOMPLETE",
+  "why": "Generated 0 Gherkin scenario(s) for a HIGH-FCA story. FCA coverage: absent. Gaps: 0.",
+  "data": {
+    "gherkin_scenarios": [],
+    "scenario_count": 0,
+    "gherkin_verdict": "INCOMPLETE",
+    "fca_coverage_present": false,
+    "coverage_gaps": [],
+    "ac_count": 4,
+    "signals": {
+      "acs_available": 4,
+      "fca_classification_available": true,
+      "refined_ac_baseline_available": true,
+      "no_scenarios_generated": 0,
+      "regulated_story_missing_fca_scenarios": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 63,
+    "calibration_multiplier": 1.0,
+    "final_score": 63,
+    "signals": {
+      "acs_available": 4,
+      "fca_classification_available": true,
+      "refined_ac_baseline_available": true,
+      "no_scenarios_generated": 0,
+      "regulated_story_missing_fca_scenarios": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:37:41.270837"
+}

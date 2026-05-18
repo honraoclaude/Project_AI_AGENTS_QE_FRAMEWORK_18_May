@@ -1,0 +1,10 @@
+{
+  "agent_id": 12,
+  "agent_name": "Apex Coverage",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "error",
+  "error": "[Errno 11001] getaddrinfo failed",
+  "error_type": "ConnectError",
+  "elapsed_ms": 4079
+}

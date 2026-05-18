@@ -1,0 +1,38 @@
+{
+  "agent_id": 27,
+  "agent_name": "CRT Execution Agent",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2104,
+  "what": "CRT execution for FSC-2417: 0 test(s) run, 0 passed, 0 failed \u2014 verdict=SKIPPED",
+  "why": "CRT execution for FSC-2417 ran zero tests and was skipped entirely, preventing any validation of the story's acceptance criteria. The QE engineer must investigate why the test suite did not execute\u2014check for missing test configuration, disabled test classes, environment setup failures, or blocked automation gates.",
+  "data": {
+    "crt_results": [],
+    "crt_pass_count": 0,
+    "crt_fail_count": 0,
+    "crt_execution_verdict": "SKIPPED",
+    "tests_executed": 0,
+    "execution_concern": "execution_skipped",
+    "narrative": "CRT execution for FSC-2417 ran zero tests and was skipped entirely, preventing any validation of the story's acceptance criteria. The QE engineer must investigate why the test suite did not execute\u2014check for missing test configuration, disabled test classes, environment setup failures, or blocked automation gates.",
+    "signals": {
+      "env_ready_for_execution": true,
+      "no_crt_test_cases": 0,
+      "execution_skipped": 0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 52,
+    "calibration_multiplier": 1.0,
+    "final_score": 52,
+    "signals": {
+      "env_ready_for_execution": true,
+      "no_crt_test_cases": 0,
+      "execution_skipped": 0
+    },
+    "escalated": true
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:02.671724"
+}

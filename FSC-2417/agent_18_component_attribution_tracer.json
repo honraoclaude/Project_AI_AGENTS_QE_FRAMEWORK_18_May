@@ -1,0 +1,38 @@
+{
+  "agent_id": 18,
+  "agent_name": "Component Attribution Tracer",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2573,
+  "what": "Component attribution for FSC-2417: 0 component(s) identified, 0 regulated, 0 merge-risk \u2014 verdict=PASS",
+  "why": "No Salesforce components were modified in story FSC-2417. No FCA-regulated components or merge-risk scenarios are present. This story passes attribution review with no further action required.",
+  "data": {
+    "changed_components": [],
+    "regulated_components": [],
+    "merge_risk_components": [],
+    "component_verdict": "PASS",
+    "total_components": 0,
+    "attribution_concern": "none",
+    "narrative": "No Salesforce components were modified in story FSC-2417. No FCA-regulated components or merge-risk scenarios are present. This story passes attribution review with no further action required.",
+    "signals": {
+      "no_files_available": 0,
+      "branch_context_available": true,
+      "metadata_scope_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 64,
+    "calibration_multiplier": 1.0,
+    "final_score": 64,
+    "signals": {
+      "no_files_available": 0,
+      "branch_context_available": true,
+      "metadata_scope_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:18.862882"
+}

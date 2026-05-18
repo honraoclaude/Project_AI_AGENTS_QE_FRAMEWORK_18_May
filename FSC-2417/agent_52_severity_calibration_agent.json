@@ -1,0 +1,84 @@
+{
+  "agent_id": 52,
+  "agent_name": "Severity Calibration Agent",
+  "phase": "Monitoring",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 8497,
+  "what": "Weekly calibration: 3 agent(s) adjusted \u2014 verdict=ADJUSTED",
+  "why": "This week's calibration run across 6 signal rows resulted in targeted upward adjustments to three agents: Agent 2 (INVEST Quality) received a +1 base confidence increase (65\u219266) on the back of a 2.2% FP rate well below the 5% threshold, Agent 44 (FCA Evidence Pack) similarly gained +1 (65\u219266) with a 3.3% FP rate, and Agent 33 (Test Coverage Analyser) received the largest uplift of +2 (65\u219267) after recording a perfect 0.0% FP rate, reflecting consistently high signal precision. Agents 1 (Story Intent), 3 (FCA Classifier), and 5 (AC Generator) were held at their current baselines \u2014 Agents 1 and 3 remain stable within acceptable bounds at 6.7% and 4.4% respectively, while Agent 5 (AC Generator) warrants monitoring attention as its 10.5% FP rate is the highest observed this week and, although still classified as within acceptable range, is approaching a level that may warrant a threshold review in the next calibration cycle.",
+  "data": {
+    "threshold_adjustments": [
+      {
+        "agent_id": 1,
+        "agent_name": "Story Intent",
+        "current_base": 60,
+        "recommended_base": 60,
+        "adjustment": 0,
+        "reason": "FP rate 6.7% within acceptable range"
+      },
+      {
+        "agent_id": 2,
+        "agent_name": "INVEST Quality",
+        "current_base": 65,
+        "recommended_base": 66,
+        "adjustment": 1,
+        "reason": "FP rate 2.2% well below 5% threshold"
+      },
+      {
+        "agent_id": 3,
+        "agent_name": "FCA Classifier",
+        "current_base": 70,
+        "recommended_base": 70,
+        "adjustment": 0,
+        "reason": "FP rate 4.4% well below 5% threshold"
+      },
+      {
+        "agent_id": 5,
+        "agent_name": "AC Generator",
+        "current_base": 65,
+        "recommended_base": 65,
+        "adjustment": 0,
+        "reason": "FP rate 10.5% within acceptable range"
+      },
+      {
+        "agent_id": 33,
+        "agent_name": "Test Coverage Analyser",
+        "current_base": 65,
+        "recommended_base": 67,
+        "adjustment": 2,
+        "reason": "FP rate 0.0% well below 5% threshold"
+      },
+      {
+        "agent_id": 44,
+        "agent_name": "FCA Evidence Pack",
+        "current_base": 65,
+        "recommended_base": 66,
+        "adjustment": 1,
+        "reason": "FP rate 3.3% well below 5% threshold"
+      }
+    ],
+    "agents_adjusted": 3,
+    "calibration_verdict": "ADJUSTED",
+    "calibration_summary": "This week's calibration run across 6 signal rows resulted in targeted upward adjustments to three agents: Agent 2 (INVEST Quality) received a +1 base confidence increase (65\u219266) on the back of a 2.2% FP rate well below the 5% threshold, Agent 44 (FCA Evidence Pack) similarly gained +1 (65\u219266) with a 3.3% FP rate, and Agent 33 (Test Coverage Analyser) received the largest uplift of +2 (65\u219267) after recording a perfect 0.0% FP rate, reflecting consistently high signal precision. Agents 1 (Story Intent), 3 (FCA Classifier), and 5 (AC Generator) were held at their current baselines \u2014 Agents 1 and 3 remain stable within acceptable bounds at 6.7% and 4.4% respectively, while Agent 5 (AC Generator) warrants monitoring attention as its 10.5% FP rate is the highest observed this week and, although still classified as within acceptable range, is approaching a level that may warrant a threshold review in the next calibration cycle.",
+    "key_insight": "Agent 5 (AC Generator) posted the week's highest false-positive rate at 10.5%, making it the primary candidate for close monitoring ahead of the next calibration run.",
+    "signal_rows_analysed": 6,
+    "signals": {
+      "sparse_signals": 6,
+      "adjustments_made": 3
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 70,
+    "calibration_multiplier": 1.0,
+    "final_score": 70,
+    "signals": {
+      "sparse_signals": 6,
+      "adjustments_made": 3
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:40:34.784668"
+}

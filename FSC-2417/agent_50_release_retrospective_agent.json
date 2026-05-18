@@ -1,0 +1,60 @@
+{
+  "agent_id": 50,
+  "agent_name": "Release Retrospective Agent",
+  "phase": "Release",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 23394,
+  "what": "Retrospective for FSC-2417: 4 lesson(s) \u2014 verdict=PARTIAL",
+  "why": "Retrospective complete.",
+  "data": {
+    "lessons_learned": [
+      {
+        "area": "Development",
+        "finding": "Development phase failed for FSC-2417, indicating the story did not meet the minimum quality gates before reaching the testing phase.",
+        "recommendation": "Enforce pre-commit checks and local coverage gates in the developer workflow to catch failures before the CI pipeline runs. Ensure developers run Apex tests locally and confirm coverage thresholds are met prior to submitting for review."
+      },
+      {
+        "area": "Test Coverage",
+        "finding": "Apex test coverage was recorded at 0.0%, a critical failure. No test classes were authored or executed for this story, blocking all downstream phases.",
+        "recommendation": "Mandate that every story touching Apex logic ships with accompanying test classes as a Definition of Done (DoD) criterion. The PO and QE Engineer should validate test class existence during sprint refinement and code review, respectively."
+      },
+      {
+        "area": "Release Readiness",
+        "finding": "Release readiness was BLOCKED and a NO_GO decision was issued. The pipeline correctly detected the 0.0% coverage failure and halted promotion to production, demonstrating the PACT guardrails functioning as intended.",
+        "recommendation": "No changes needed to the gate logic \u2014 it performed correctly. However, introduce an earlier pipeline stage that fails fast on 0.0% coverage (before full test execution) to reduce pipeline resource waste."
+      },
+      {
+        "area": "Process / Sprint Planning",
+        "finding": "The story reached the development phase without any test strategy defined, suggesting refinement did not adequately stress-test the story's technical readiness.",
+        "recommendation": "During Refinement, QE Engineers must confirm a test plan (including target Apex classes and coverage estimate) is attached to the story before it enters the sprint. Stories without a test plan should be returned to the backlog."
+      }
+    ],
+    "process_improvements": [
+      "Add a pre-pipeline local coverage check script (minimum 1% coverage to detect 'no tests written' scenarios) as a Git pre-push hook for all FSC Apex changes.",
+      "Update the Definition of Done to explicitly require at least one Apex test class per story that introduces or modifies Apex code, verified during code review.",
+      "Introduce a fast-fail pipeline stage at the start of CI that counts test class references to the changed Apex components \u2014 fail immediately if count is zero, saving full pipeline execution time.",
+      "Require QE Engineers to attach a Test Strategy artefact to each story ticket during Refinement, covering: target Apex classes, expected coverage %, and FCA classification (HIGH/MEDIUM/LOW).",
+      "Schedule a mid-sprint development checkpoint (at 50% of sprint duration) where the QE Lead reviews in-progress coverage metrics to catch 0% coverage stories before the development phase verdict is issued.",
+      "Calibrate the PACT agent confidence threshold for stories with 0.0% coverage to automatically output confidence=0 and escalate to the QE Lead without waiting for the release readiness phase."
+    ],
+    "calibration_signals": {},
+    "retrospective_verdict": "PARTIAL",
+    "narrative": "Retrospective complete.",
+    "signals": {
+      "good_phase_coverage": 3
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 70,
+    "calibration_multiplier": 1.0,
+    "final_score": 70,
+    "signals": {
+      "good_phase_coverage": 3
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:40:25.829626"
+}

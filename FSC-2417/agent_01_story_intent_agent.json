@@ -1,0 +1,61 @@
+{
+  "agent_id": 1,
+  "agent_name": "Story Intent Agent",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 9568,
+  "what": "Extracted intent for FSC-2417: goal='Build a consolidated suitability dashboard on the FSC Client 360 page that computes and displays a single suitability score (0\u2013100) from risk profile, investment objectives, and financial circumstances dimensions, enabling Wealth Advisers to make compliant advice recommendations under COBS 9.2 and Consumer Duty PS22/9.', persona='Wealth Adviser', fsc_objects=['Suitability__c', 'FinancialAccount', 'RiskProfile__c'], ac_present=True",
+  "why": "Story Intent Agent parsed Jira description and acceptance criteria to produce structured intent consumed by INVEST Quality (Agent 2), FCA Classifier (Agent 3), and Data Need (Agent 7).",
+  "data": {
+    "goal": "Build a consolidated suitability dashboard on the FSC Client 360 page that computes and displays a single suitability score (0\u2013100) from risk profile, investment objectives, and financial circumstances dimensions, enabling Wealth Advisers to make compliant advice recommendations under COBS 9.2 and Consumer Duty PS22/9.",
+    "persona": "Wealth Adviser",
+    "fsc_objects": [
+      "Suitability__c",
+      "FinancialAccount",
+      "RiskProfile__c"
+    ],
+    "fsc_components": [
+      "Apex class SuitabilityScoreCalculator (triggered by Suitability__c update)",
+      "LWC suitability-dashboard (embedded on FSC Client 360 page)",
+      "Custom field FinancialAccount.ConsolidatedSuitabilityScore__c",
+      "Platform Event SuitabilityScoreUpdated__e"
+    ],
+    "ac_present": true,
+    "ac_complete": true,
+    "missing_elements": [
+      "none"
+    ],
+    "story_summary": "FSC-2417 introduces a consolidated suitability dashboard for Wealth Advisers on the FSC Client 360 page. A new Apex class (SuitabilityScoreCalculator) computes a single 0\u2013100 suitability score from three weighted dimensions \u2014 risk profile (40%), investment objectives (35%), and financial circumstances (25%) \u2014 stored on FinancialAccount.ConsolidatedSuitabilityScore__c, and triggered by updates to Suitability__c records. A new LWC (suitability-dashboard) displays the score in real-time via a Platform Event (SuitabilityScoreUpdated__e), and enforces COBS 9.2 compliance warnings and stale-data alerts to ensure advisers always act on current, compliant assessments.",
+    "flags": [
+      "high_fca_object_detected",
+      "financial_data_object_detected"
+    ],
+    "story_summary_jira": "As a Wealth Manager, I want to view a client's consolidated suitability score combining risk profile, investment objectives, and financial circumstances, so that I can make compliant advice recommendations under COBS 9",
+    "description_word_count": 181,
+    "ac_clause_count": 4,
+    "signals": {
+      "description_words": 181,
+      "ac_complete": true,
+      "fsc_objects_count": 3,
+      "persona_identified": "Wealth Adviser",
+      "high_fca_keyword_in_text": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 92,
+    "calibration_multiplier": 1.0,
+    "final_score": 92,
+    "signals": {
+      "description_words": 181,
+      "ac_complete": true,
+      "fsc_objects_count": 3,
+      "persona_identified": "Wealth Adviser",
+      "high_fca_keyword_in_text": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:34:42.355660"
+}

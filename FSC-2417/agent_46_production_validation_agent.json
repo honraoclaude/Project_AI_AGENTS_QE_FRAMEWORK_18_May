@@ -1,0 +1,35 @@
+{
+  "agent_id": 46,
+  "agent_name": "Production Validation Agent",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2664,
+  "what": "Production validation for FSC-2417: 0/5 checks passed \u2014 verdict=SKIPPED",
+  "why": "Deployment for FSC-2417 was SKIPPED with no validation checks executed (0/5 passed), indicating that the production health check was not run or aborted before starting. Immediate action is required from the ops team to investigate why the deployment pipeline halted and to determine if critical FSC flows and Apex logic remain in a stable state. All stakeholders must be notified and post-deployment validation must be rescheduled to confirm system integrity.",
+  "data": {
+    "production_healthy": false,
+    "validation_checks_passed": 0,
+    "validation_checks_total": 5,
+    "prod_verdict": "SKIPPED",
+    "prod_concern": "deployment_skipped",
+    "narrative": "Deployment for FSC-2417 was SKIPPED with no validation checks executed (0/5 passed), indicating that the production health check was not run or aborted before starting. Immediate action is required from the ops team to investigate why the deployment pipeline halted and to determine if critical FSC flows and Apex logic remain in a stable state. All stakeholders must be notified and post-deployment validation must be rescheduled to confirm system integrity.",
+    "signals": {
+      "go_no_go_data_available": true,
+      "production_not_healthy": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 60,
+    "calibration_multiplier": 1.0,
+    "final_score": 60,
+    "signals": {
+      "go_no_go_data_available": true,
+      "production_not_healthy": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:40:02.363035"
+}

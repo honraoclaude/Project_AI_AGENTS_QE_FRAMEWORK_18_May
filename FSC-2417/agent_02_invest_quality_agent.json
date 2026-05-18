@@ -1,0 +1,59 @@
+{
+  "agent_id": 2,
+  "agent_name": "INVEST Quality Agent",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 28975,
+  "what": "INVEST score for FSC-2417: 77/100 (PASS_WITH_CONCERNS) \u2014 I=14 N=10 V=20 E=18 S=11 T=20",
+  "why": "INVEST Quality Agent scored the story across six readiness dimensions. A normalised score < 80 triggers a Gate G1 block. Found 0 blocking issue(s) and 0 improvement suggestion(s).",
+  "data": {
+    "invest_score": 77,
+    "invest_total_raw": 93,
+    "invest_verdict": "PASS_WITH_CONCERNS",
+    "dimension_scores": {
+      "independent": 14,
+      "negotiable": 10,
+      "valuable": 20,
+      "estimable": 18,
+      "small": 11,
+      "testable": 20,
+      "total_raw": 93
+    },
+    "dimension_rationales": {
+      "independent": "The story is largely self-contained with well-defined FSC objects and components, but it implicitly depends on the existing MiFID II risk profile data, objectives register, and financial circumstances records being present and correctly structured \u2014 these upstream data dependencies are not tracked as separate stories yet could block implementation or testing.",
+      "negotiable": "The user goal and regulatory outcome are clearly stated, but the Technical Scope section over-specifies implementation detail \u2014 naming the exact Apex class (SuitabilityScoreCalculator), LWC component (suitability-dashboard), custom field API name and data type (Number 3,2), and Platform Event name (SuitabilityScoreUpdated__e) \u2014 leaving the development team little room to negotiate the technical approach.",
+      "valuable": "The story directly and explicitly addresses COBS 9.2 suitability compliance and Consumer Duty PS22/9 good outcomes, eliminating a manual, error-prone cross-system process; the regulatory and adviser-efficiency value is unambiguous and substantial.",
+      "estimable": "All FSC objects are named (Suitability__c, FinancialAccount, RiskProfile__c), the Apex trigger pattern, LWC, custom field, and Platform Event are identified, scope is bounded with a clear Out-of-Scope section, and four fully-formed ACs provide complexity anchors \u2014 a team could estimate this confidently in story points, with only minor ambiguity around the weighting algorithm logic.",
+      "small": "The story touches multiple FSC objects (Suitability__c, FinancialAccount, RiskProfile__c), introduces a new Apex class, a new LWC, a custom field, and a Platform Event with real-time refresh, plus four distinct AC scenarios including a compliance warning flow \u2014 this is at the upper boundary of a single sprint and carries meaningful delivery risk.",
+      "testable": "All four acceptance criteria are written in full Given/When/Then format covering the happy path (Scenario 1), an automated recalculation trigger (Scenario 2), a stale-data edge case (Scenario 3), and a regulatory compliance warning with audit trail (Scenario 4) \u2014 comprehensive coverage of happy path, error state, edge case, and compliance enforcement."
+    },
+    "blocking_issues": [],
+    "improvement_suggestions": [],
+    "ac_clause_count": 4,
+    "agent1_available": true,
+    "signals": {
+      "invest_margin": 3,
+      "testable_high": 20,
+      "ac_present": true,
+      "description_rich": 181,
+      "no_missing_elements": 0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 81,
+    "calibration_multiplier": 1.0,
+    "final_score": 81,
+    "signals": {
+      "invest_margin": 3,
+      "testable_high": 20,
+      "ac_present": true,
+      "description_rich": 181,
+      "no_missing_elements": 0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:35:05.772496"
+}

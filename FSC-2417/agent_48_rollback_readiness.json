@@ -1,0 +1,37 @@
+{
+  "agent_id": 48,
+  "agent_name": "Rollback Readiness",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 23394,
+  "what": "Rollback readiness for FSC-2417: feasible=True, risk=LOW \u2014 verdict=FEASIBLE",
+  "why": "FSC-2417 is LOW-risk and can be safely rolled back by deploying the previous change set version via Copado with minimal operational friction. No destructive changes, schema migrations, or high-complexity logic are present in this deployment, making rollback a straightforward reversal process. The ops team should verify the previous version is available in Copado and execute the standard rollback procedure, then confirm functionality in a staging environment post-rollback.",
+  "data": {
+    "rollback_feasible": true,
+    "rollback_risk": "LOW",
+    "rollback_steps": [
+      "Deploy previous change set version via Copado"
+    ],
+    "rollback_verdict": "FEASIBLE",
+    "rollback_concern": "none",
+    "narrative": "FSC-2417 is LOW-risk and can be safely rolled back by deploying the previous change set version via Copado with minimal operational friction. No destructive changes, schema migrations, or high-complexity logic are present in this deployment, making rollback a straightforward reversal process. The ops team should verify the previous version is available in Copado and execute the standard rollback procedure, then confirm functionality in a staging environment post-rollback.",
+    "signals": {
+      "metadata_available": true,
+      "change_set_data_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 71,
+    "calibration_multiplier": 1.0,
+    "final_score": 71,
+    "signals": {
+      "metadata_available": true,
+      "change_set_data_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:40:05.641746"
+}

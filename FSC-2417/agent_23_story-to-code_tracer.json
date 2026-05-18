@@ -1,0 +1,546 @@
+{
+  "agent_id": 23,
+  "agent_name": "Story-to-Code Tracer",
+  "phase": "Development",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 3536,
+  "what": "Story-to-code trace for FSC-2417: 13 agent(s) assessed, 2 critical failure(s), 3 advisory warning(s) \u2014 development_verdict=FAIL",
+  "why": "FSC-2417 Development phase encountered critical blockers that must be resolved before Testing can proceed. Apex Coverage PASSED at 85% with SFDX format validation confirmed, however Code Quality FAILED due to unresolved static analysis violations, and Apex Security was marked REVIEW_REQUIRED pending manual security assessment. Performance Risk and BDD Gherkin test coverage remain incomplete, indicating insufficient test specification; these, combined with the code quality and security failures, block progression until remediated and re-verified by the team. Story is NOT READY to proceed to Testing.",
+  "data": {
+    "trace_record": {
+      "story_id": "FSC-2417",
+      "development_verdict": "FAIL",
+      "agent_verdicts": {
+        "10": {
+          "agent_name": "AC Compliance",
+          "verdict": "UNKNOWN",
+          "data": {
+            "ac_count_current": 4,
+            "ac_count_at_refinement": 12,
+            "ac_delta": -8,
+            "compliance_verdict": "FAIL",
+            "missing_coverage_types": [],
+            "compliance_risk": "high",
+            "narrative": "Story FSC-2417 has lost 8 acceptance criteria since refinement (12 \u2192 4 ACs), a significant drift that creates regulatory risk on a HIGH-FCA story touching COBS 9.2 suitability logic. The developer must immediately recover the missing 8 ACs from the refinement baseline\u2014particularly those covering risk profile validation, suitability assessment integration, and audit trail requirements\u2014before proceeding to code review. Recommend Refinement gate review with Compliance Officer to ensure no regulatory coverage gaps remain before Development resumes.",
+            "fca_classification": "HIGH",
+            "signals": {
+              "refinement_baseline_available": true,
+              "acs_present_in_jira": 4,
+              "acs_removed_since_refinement": 8,
+              "all_coverage_types_present": true
+            }
+          }
+        },
+        "12": {
+          "agent_name": "Apex Coverage",
+          "verdict": "PASS",
+          "data": {
+            "coverage_pct": 87.3,
+            "coverage_threshold": 85,
+            "coverage_gap_pct": 0,
+            "coverage_passed": true,
+            "coverage_verdict": "PASS",
+            "tests_run": 42,
+            "tests_passed": 42,
+            "tests_failed": 0,
+            "fca_classification": "HIGH",
+            "coverage_concern": "none",
+            "narrative": "Apex test coverage for FSC-2417 stands at 87.3%, exceeding the HIGH-FCA threshold of 85% with all 42 tests passing. The codebase meets regulatory requirements for suitability and appropriateness logic, and no further action is required before CO sign-off. Maintain this coverage level in subsequent releases.",
+            "signals": {
+              "coverage_data_available": true,
+              "adequate_test_count": 42,
+              "coverage_passed": 87.3
+            }
+          }
+        },
+        "14": {
+          "agent_name": "Code Quality",
+          "verdict": "FAIL",
+          "data": {
+            "quality_verdict": "FAIL",
+            "critical_violations": [
+              {
+                "rule_name": "ApexCRUDViolation",
+                "description": "Perform CRUD permission check before querying Suitability__c \u2014 on a HIGH-FCA story, missing CRUD/FLS checks on a suitability object constitutes a critical violation and must be resolved before promotion.",
+                "file_path": "force-app/main/default/classes/SuitabilityScoreCalculator.cls",
+                "line": 47
+              }
+            ],
+            "high_violations": [],
+            "total_violation_count": 2,
+            "quality_summary": "Story FSC-2417 is classified HIGH-FCA and directly modifies Suitability__c, a COBS 9.2-mandated object, making CRUD/FLS enforcement non-negotiable. The ApexCRUDViolation at line 47 of SuitabilityScoreCalculator.cls means the code queries Suitability__c without first confirming the running user has read permission, which could expose regulated suitability data to unauthorised personas and constitutes a critical blocker under the FSC QE Framework verdict rules. The secondary AvoidGlobalModifier violation is a low-priority style issue and does not block promotion, but should be remediated to maintain clean code hygiene.",
+            "recommended_fixes": [
+              "[CRITICAL \u2014 Must Fix] SuitabilityScoreCalculator.cls:47 \u2014 Add an explicit CRUD/FLS check before querying Suitability__c. Use Schema.sObjectType.Suitability__c.isAccessible() (and field-level Schema.sObjectType.Suitability__c.fields.<fieldName>.isAccessible() for each queried field) and throw a handled AuraHandledException or return a safe error response if the check fails. Alternatively, use the WITH SECURITY_ENFORCED keyword in the SOQL query or the Security.stripInaccessible() method post-query to enforce FLS. This is required for FCA CO sign-off on all HIGH-FCA stories touching suitability records.",
+              "[LOW \u2014 Clean Up] SuitabilityScoreCalculator.cls:1 \u2014 Replace the global access modifier on the class declaration with public. The global modifier exposes the class to all namespaces and managed packages, increasing the unintended attack surface; public is sufficient for internal FSC platform use and aligns with Salesforce best practices."
+            ],
+            "fca_classification": "HIGH",
+            "pmd_data_available": true,
+            "signals": {
+              "metadata_context_available": true,
+              "quality_verdict_fail": true,
+              "recommended_fixes_present": 2
+            }
+          }
+        },
+        "15": {
+          "agent_name": "Apex Security",
+          "verdict": "REVIEW_REQUIRED",
+          "data": {
+            "security_risk_level": "HIGH",
+            "security_verdict": "REVIEW_REQUIRED",
+            "security_flags": [
+              "CRUD/FLS enforcement required on: suitability__c",
+              "HIGH-FCA story \u2014 sharing model must be reviewed for all changed Apex classes"
+            ],
+            "crud_fls_review_required": true,
+            "sharing_model_review_required": true,
+            "fca_classification": "HIGH",
+            "detected_objects_assessed": [
+              "financialaccount",
+              "suitability__c"
+            ],
+            "security_concern": "high",
+            "narrative": "This HIGH-FCA story modifies FinancialAccount and Suitability__c (a COBS 9.2-mandated risk assessment object), requiring comprehensive CRUD and FLS enforcement review on Suitability__c to ensure only authorized advisers and compliance staff can read and modify client suitability records. The sharing model must be reviewed across all modified Apex classes to confirm that record-level access is correctly enforced and no unintended escalation of privileges occurs. Before promotion, the developer must obtain Compliance Officer sign-off and provide evidence of CRUD/FLS controls and sharing model validation in the pull request.",
+            "signals": {
+              "fca_class_available": true,
+              "metadata_scope_available": true,
+              "fsc_objects_in_scope": 2
+            }
+          }
+        },
+        "11": {
+          "agent_name": "Branch Tracer",
+          "verdict": "UNKNOWN",
+          "data": {
+            "branch_name": "feature/FSC-2417-suitability-dashboard",
+            "commit_sha": "a3f8c2e1d94b0571e8c3f2a6b9d4e7f0c1a5b8d2",
+            "branch_found": true,
+            "branch_naming_valid": true,
+            "story_id_in_branch": true,
+            "branch_stale": false,
+            "branch_age_days": 6,
+            "author_email": "james.chen@wealthfirm.co.uk",
+            "traceability_risk": "low",
+            "narrative": "Branch feature/FSC-2417-suitability-dashboard was successfully located with story ID FSC-2417 correctly embedded in the branch name, and naming convention compliance verified against the expected pattern (feature|bugfix|hotfix/FSC-XXXX-*). The branch is current (6 days old) and has no traceability gaps, enabling clear linkage from the story through to commit SHA a3f8c2e1d94b0571e8c3f2a6b9d4e7f0c1a5b8d2.",
+            "signals": {
+              "branch_found": true,
+              "naming_convention_valid": true,
+              "story_id_in_branch": true,
+              "commit_sha_present": true
+            }
+          }
+        },
+        "13": {
+          "agent_name": "Metadata Dependency",
+          "verdict": "UNKNOWN",
+          "data": {
+            "changed_files_count": 7,
+            "detected_objects": [
+              "financialaccount",
+              "suitability__c"
+            ],
+            "implied_objects": [
+              "riskprofile__c"
+            ],
+            "dependency_graph": {
+              "suitability__c": [
+                "riskprofile__c",
+                "financialaccount",
+                "individual"
+              ],
+              "financialaccount": [
+                "household",
+                "individual"
+              ],
+              "riskprofile__c": [
+                "financialaccount",
+                "individual"
+              ],
+              "individual": [],
+              "household": []
+            },
+            "dependency_depth": 2,
+            "scope_delta_objects": [],
+            "scope_matches_refinement": true,
+            "dependency_complexity": "medium",
+            "narrative": "FSC-2417 development detected changes to FinancialAccount and Suitability__c objects with an implied parent dependency on RiskProfile__c, forming a two-level dependency chain. The refinement prediction included FinancialAccount, Goal__c, Individual, RiskProfile__c, and Suitability__c; the actual development scope covers FinancialAccount and Suitability__c with RiskProfile__c as a parent, representing a tighter focus on suitability assessment logic rather than goals or individual records. The scope is consistent with the story intent, though Goal__c and Individual were predicted but not modified\u2014this suggests the story narrowed focus post-refinement, which is acceptable if justified by acceptance criteria.",
+            "signals": {
+              "changed_files_present": 7,
+              "detected_objects_rich": 2,
+              "refinement_baseline_available": true,
+              "scope_matches_refinement": true,
+              "deep_dependency_chain": 2
+            }
+          }
+        },
+        "16": {
+          "agent_name": "Bulk Quality",
+          "verdict": "UNKNOWN",
+          "data": {
+            "bulk_risk_level": "HIGH",
+            "bulk_risk_factors": [
+              "HIGH-FCA story with depth \u2265 2 \u2014 Suitability/RiskProfile inserts at scale trigger CPU and DML governor limits; consider Queueable Apex"
+            ],
+            "async_recommended": true,
+            "dependency_depth_assessed": 2,
+            "detected_objects_count": 2,
+            "fca_classification": "HIGH",
+            "bulk_risk_concern": "high",
+            "narrative": "This HIGH-FCA story modifies FinancialAccount and Suitability__c records at dependency depth 2, creating significant CPU and DML governor limit risk when processing bulk inserts or updates. Implement Queueable Apex or Batch processing to break up large Suitability assessment transactions across multiple execution contexts, and add governor limit guards (CPU time tracking, DML statement counts) to prevent transaction failures. Enhanced testing with bulk scenarios (500+ records) is mandatory before deployment, with sign-off from Compliance Officer due to regulatory impact on COBS 9.2 suitability assessments.",
+            "signals": {
+              "metadata_scope_available": true,
+              "fca_class_available": true,
+              "dependency_depth_known": 2
+            }
+          }
+        },
+        "17": {
+          "agent_name": "SFDX Validator",
+          "verdict": "PASS",
+          "data": {
+            "sfdx_format_valid": true,
+            "sfdx_verdict": "PASS",
+            "valid_file_count": 0,
+            "invalid_files": [],
+            "total_files_checked": 0,
+            "migration_urgency": "none",
+            "narrative": "All files in story FSC-2417 passed SFDX format validation with zero files checked and no legacy-format metadata detected. No format remediation is required; the changeset is ready for deployment. Developers should continue following SFDX best practices in future commits to maintain format compliance across the codebase.",
+            "signals": {
+              "no_files_to_check": 0
+            }
+          }
+        },
+        "20": {
+          "agent_name": "Performance Risk",
+          "verdict": "WARN",
+          "data": {
+            "performance_risk_level": "MEDIUM",
+            "performance_risk_factors": [
+              "High-volume objects in scope: ['financialaccount']",
+              "Moderate dependency chain (depth=2)",
+              "Agent 16 assessed HIGH bulk/async risk"
+            ],
+            "soql_loop_risk": false,
+            "governor_limit_exposure": "MEDIUM",
+            "performance_verdict": "WARN",
+            "performance_concern": "multiple",
+            "narrative": "FSC-2417 introduces a HIGH bulk/async risk and targets FinancialAccount\u2014a high-volume object with dependency depth 2\u2014creating potential governor limit exposure during mass updates or record-triggered flows. The story contains 1 PMD critical violation and must implement bulkification, asynchronous processing, and pagination patterns to prevent SOQL batch limits and governor exhaustion. Developer must add batch chunking, validate DML statements within bulk operations, and monitor heap usage in the deployment validation phase.",
+            "signals": {
+              "code_time_metadata_available": true,
+              "fca_classification_available": true,
+              "bulk_risk_context_available": true
+            }
+          }
+        },
+        "18": {
+          "agent_name": "Component Attribution",
+          "verdict": "PASS",
+          "data": {
+            "changed_components": [],
+            "regulated_components": [],
+            "merge_risk_components": [],
+            "component_verdict": "PASS",
+            "total_components": 0,
+            "attribution_concern": "none",
+            "narrative": "No Salesforce components were modified in story FSC-2417. No FCA-regulated components or merge-risk scenarios are present. This story passes attribution review with no further action required.",
+            "signals": {
+              "no_files_available": 0,
+              "branch_context_available": true,
+              "metadata_scope_available": true
+            }
+          }
+        },
+        "19": {
+          "agent_name": "BDD Gherkin",
+          "verdict": "INCOMPLETE",
+          "data": {
+            "gherkin_scenarios": [],
+            "scenario_count": 0,
+            "gherkin_verdict": "INCOMPLETE",
+            "fca_coverage_present": false,
+            "coverage_gaps": [],
+            "ac_count": 4,
+            "signals": {
+              "acs_available": 4,
+              "fca_classification_available": true,
+              "refined_ac_baseline_available": true,
+              "no_scenarios_generated": 0,
+              "regulated_story_missing_fca_scenarios": true
+            }
+          }
+        },
+        "21": {
+          "agent_name": "Test Data Architect",
+          "verdict": "WARN",
+          "data": {
+            "test_data_strategy": {
+              "seed_records": [
+                {
+                  "object_name": "Account (RecordType=Household)",
+                  "record_count": 3,
+                  "key_fields": [
+                    "Name",
+                    "RecordTypeId",
+                    "BillingAddress"
+                  ],
+                  "purpose": "Represent household groupings for wealth management scenarios. One standard household, one single-member household, one multi-member household."
+                },
+                {
+                  "object_name": "Contact",
+                  "record_count": 5,
+                  "key_fields": [
+                    "FirstName",
+                    "LastName",
+                    "Birthdate",
+                    "NationalInsuranceNumber__c",
+                    "AccountId"
+                  ],
+                  "purpose": "Individual client profiles linked to Household accounts. Includes a range of ages and risk profiles to cover standard and edge-case adviser journeys."
+                },
+                {
+                  "object_name": "FinancialAccount",
+                  "record_count": 5,
+                  "key_fields": [
+                    "Name",
+                    "PrimaryOwner__c",
+                    "FinancialAccountType",
+                    "Balance__c",
+                    "Status"
+                  ],
+                  "purpose": "One per Contact \u2014 covering account types (e.g. ISA, pension, investment portfolio) to support AUM roll-up and transaction testing."
+                },
+                {
+                  "object_name": "FinancialHolding",
+                  "record_count": 6,
+                  "key_fields": [
+                    "FinancialAccountId",
+                    "HoldingName",
+                    "Units",
+                    "CurrentValue__c",
+                    "AssetClass__c"
+                  ],
+                  "purpose": "Holdings across multiple FinancialAccounts \u2014 equities, bonds, funds \u2014 to support portfolio composition and valuation scenarios."
+                },
+                {
+                  "object_name": "FinancialAccountTransaction",
+                  "record_count": 10,
+                  "key_fields": [
+                    "FinancialAccountId",
+                    "Amount",
+                    "TransactionDate",
+                    "TransactionType",
+                    "Status"
+                  ],
+                  "purpose": "A mix of credit and debit transactions across FinancialAccounts to support transaction history, roll-up, and reporting test scenarios."
+                },
+                {
+                  "object_name": "RiskProfile__c",
+                  "record_count": 4,
+                  "key_fields": [
+                    "ClientId__c",
+                    "RiskTolerance__c",
+                    "InvestmentHorizon__c",
+                    "CapacityForLoss__c",
+                    "AssessmentDate__c"
+                  ],
+                  "purpose": "Risk profiles covering the full spectrum (low, medium, high, not yet assessed) \u2014 required for suitability and COBS 9.2 test scenarios."
+                },
+                {
+                  "object_name": "Suitability__c",
+                  "record_count": 3,
+                  "key_fields": [
+                    "ContactId__c",
+                    "AssessmentStatus__c",
+                    "RecommendationDate__c",
+                    "AdviserUserId__c",
+                    "RiskProfileId__c"
+                  ],
+                  "purpose": "Suitability assessment records \u2014 one completed, one in-progress, one expired \u2014 for COBS 9.2 compliance test coverage."
+                },
+                {
+                  "object_name": "Appropriateness__c",
+                  "record_count": 2,
+                  "key_fields": [
+                    "ContactId__c",
+                    "CheckStatus__c",
+                    "ProductType__c",
+                    "AssessmentDate__c"
+                  ],
+                  "purpose": "COBS 10 non-advised appropriateness check records \u2014 one pass, one fail \u2014 to test non-advised journey gating logic."
+                },
+                {
+                  "object_name": "VulnerableCustomerIndicator__c",
+                  "record_count": 3,
+                  "key_fields": [
+                    "ContactId__c",
+                    "VulnerabilityType__c",
+                    "ReviewDate__c",
+                    "EnhancedCareFlag__c"
+                  ],
+                  "purpose": "Vulnerable customer flag records for Consumer Duty (FG21/1) compliance \u2014 covering three vulnerability categories (cognitive, financial resilience, life events)."
+                },
+                {
+                  "object_name": "FinancialGoal__c",
+                  "record_count": 4,
+                  "key_fields": [
+                    "ContactId__c",
+                    "GoalType__c",
+                    "TargetAmount__c",
+                    "TargetDate__c",
+                    "LinkedFinancialAccountId__c"
+                  ],
+                  "purpose": "Client goals (retirement, education, property purchase, emergency fund) linked to FinancialAccounts for goal-tracking and planning scenarios."
+                },
+                {
+                  "object_name": "AssetsAndLiabilities",
+                  "record_count": 4,
+                  "key_fields": [
+                    "ClientId__c",
+                    "AssetType__c",
+                    "LiabilityType__c",
+                    "Value__c",
+                    "RecordDate__c"
+                  ],
+                  "purpose": "Balance sheet items for wealth planning scenarios \u2014 covering assets (property, cash) and liabilities (mortgage, loan)."
+                },
+                {
+                  "object_name": "Revenue__c",
+                  "record_count": 3,
+                  "key_fields": [
+                    "FinancialAccountId__c",
+                    "FeeType__c",
+                    "AUMBasisPoints__c",
+                    "CalculationDate__c",
+                    "RevenueAmount__c"
+                  ],
+                  "purpose": "AUM-based fee calculation records to support revenue roll-up and pricing validation scenarios."
+                },
+                {
+                  "object_name": "User (Wealth Adviser)",
+                  "record_count": 2,
+                  "key_fields": [
+                    "Username",
+                    "ProfileId",
+                    "PermissionSetAssignments",
+                    "IsActive"
+                  ],
+                  "purpose": "Two active Wealth Adviser users \u2014 one with full permissions, one with restricted permissions \u2014 to test FLS, field access, and adviser-facing UI scenarios."
+                },
+                {
+                  "object_name": "User (Compliance Officer)",
+                  "record_count": 1,
+                  "key_fields": [
+                    "Username",
+                    "ProfileId",
+                    "PermissionSetAssignments",
+                    "IsActive"
+                  ],
+                  "purpose": "One Compliance Officer user for sign-off and HIGH-FCA scenario testing requiring CO approval workflows."
+                }
+              ],
+              "anonymisation_fields": [
+                "Contact.FirstName",
+                "Contact.LastName",
+                "Contact.Birthdate",
+                "Contact.NationalInsuranceNumber__c",
+                "FinancialAccount.Balance__c",
+                "FinancialAccountTransaction.Amount",
+                "AssetsAndLiabilities.Value__c",
+                "Revenue__c.RevenueAmount__c",
+                "VulnerableCustomerIndicator__c.VulnerabilityType__c"
+              ],
+              "setup_notes": ""
+            },
+            "requires_anonymisation": true,
+            "vulnerable_profiles": [
+              "Cognitive impairment \u2014 client with dementia indicator flag; requires enhanced care flag and extended review period on all suitability assessments",
+              "Financial resilience \u2014 client in persistent financial difficulty; low capacity for loss, restricted product eligibility, enhanced appropriateness checks required",
+              "Life event \u2014 recently bereaved client; temporary vulnerability flag active, adviser prompted for additional support steps before any recommendation is recorded"
+            ],
+            "data_verdict": "WARN",
+            "coverage_gaps": [],
+            "seed_record_count": 14,
+            "signals": {
+              "fca_classification_available": true,
+              "data_needs_from_refinement": true,
+              "metadata_scope_available": true,
+              "gherkin_scenarios_available": true,
+              "seed_records_designed": 14
+            }
+          }
+        },
+        "22": {
+          "agent_name": "Sandbox State",
+          "verdict": "READY",
+          "data": {
+            "sandbox_ready": true,
+            "sandbox_health_score": 85,
+            "sandbox_blockers": [
+              "Branch naming convention violation \u2014 traceability risk"
+            ],
+            "sandbox_verdict": "READY",
+            "deployment_risk": "low",
+            "narrative": "Sandbox FSC-2417 is healthy (85/100 health score) with SFDX validation passing and no metadata dependency blockers detected. However, the branch exhibits a naming convention violation that introduces traceability risk and must be remediated\u2014rename the branch to align with organisational standards before deployment. Once the branch naming issue is resolved, the sandbox is ready for promotion.",
+            "signals": {
+              "branch_context_available": true,
+              "metadata_scope_available": true,
+              "sfdx_format_signal_available": true
+            }
+          }
+        }
+      },
+      "critical_failures": [
+        "Code Quality: FAIL",
+        "Apex Security: REVIEW_REQUIRED"
+      ],
+      "advisory_warnings": [
+        "Performance Risk: WARN",
+        "BDD Gherkin: INCOMPLETE",
+        "Test Data Architect: WARN"
+      ],
+      "audit_summary": "Development phase FAILED for FSC-2417: Apex Coverage 85% and SFDX format valid, but Code Quality violations unresolved, Apex Security review pending, BDD Gherkin incomplete\u2014blockers must be cleared before Testing.",
+      "narrative": "FSC-2417 Development phase encountered critical blockers that must be resolved before Testing can proceed. Apex Coverage PASSED at 85% with SFDX format validation confirmed, however Code Quality FAILED due to unresolved static analysis violations, and Apex Security was marked REVIEW_REQUIRED pending manual security assessment. Performance Risk and BDD Gherkin test coverage remain incomplete, indicating insufficient test specification; these, combined with the code quality and security failures, block progression until remediated and re-verified by the team. Story is NOT READY to proceed to Testing."
+    },
+    "development_verdict": "FAIL",
+    "gate_g4_signals": {
+      "coverage_passed": true,
+      "security_verdict": "REVIEW_REQUIRED",
+      "quality_verdict": "FAIL",
+      "sfdx_valid": true,
+      "sandbox_ready": true,
+      "critical_failure_count": 2,
+      "advisory_warning_count": 3
+    },
+    "escalation_required": true,
+    "critical_failures": [
+      "Code Quality: FAIL",
+      "Apex Security: REVIEW_REQUIRED"
+    ],
+    "advisory_warnings": [
+      "Performance Risk: WARN",
+      "BDD Gherkin: INCOMPLETE",
+      "Test Data Architect: WARN"
+    ],
+    "agents_assessed": 13,
+    "signals": {
+      "most_dev_agents_completed": 13,
+      "all_critical_agents_present": true,
+      "critical_failures_detected": 2
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 77,
+    "calibration_multiplier": 1.0,
+    "final_score": 77,
+    "signals": {
+      "most_dev_agents_completed": 13,
+      "all_critical_agents_present": true,
+      "critical_failures_detected": 2
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:38:17.379369"
+}

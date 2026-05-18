@@ -1,0 +1,62 @@
+{
+  "agent_id": 8,
+  "agent_name": "Dependency Mapping",
+  "phase": "Refinement",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 9568,
+  "what": "Dependency map for FSC-2417: detected=['financialaccount', 'goal__c', 'individual', 'riskprofile__c', 'suitability__c'], implied=[], depth=1",
+  "why": "FSC-2417 detects five FSC objects\u2014FinancialAccount, FinancialGoal (Goal__c), Individual, RiskProfile__c, and Suitability__c\u2014spanning client identity, financial holdings, objectives, risk tolerance, and regulatory assessment. These objects form a single-level dependency hierarchy with no implied parent records, indicating a straightforward horizontal aggregation of suitability components. The deployment complexity is moderate: the consolidated score calculation must honour field-level security on Suitability__c and RiskProfile__c, integrate multiple data sources without triggering unintended trigger cascades, and ensure the score remains compliant with COBS 9.2 suitability requirements and FCA Consumer Duty outcomes.",
+  "data": {
+    "detected_objects": [
+      "financialaccount",
+      "goal__c",
+      "individual",
+      "riskprofile__c",
+      "suitability__c"
+    ],
+    "implied_objects": [],
+    "dependency_graph": {
+      "financialaccount": [
+        "household",
+        "individual"
+      ],
+      "riskprofile__c": [
+        "financialaccount",
+        "individual"
+      ],
+      "suitability__c": [
+        "riskprofile__c",
+        "financialaccount",
+        "individual"
+      ],
+      "individual": [],
+      "goal__c": [
+        "financialaccount",
+        "individual"
+      ],
+      "household": []
+    },
+    "dependency_depth": 1,
+    "cross_object_count": 5,
+    "dependency_complexity": "medium",
+    "narrative": "FSC-2417 detects five FSC objects\u2014FinancialAccount, FinancialGoal (Goal__c), Individual, RiskProfile__c, and Suitability__c\u2014spanning client identity, financial holdings, objectives, risk tolerance, and regulatory assessment. These objects form a single-level dependency hierarchy with no implied parent records, indicating a straightforward horizontal aggregation of suitability components. The deployment complexity is moderate: the consolidated score calculation must honour field-level security on Suitability__c and RiskProfile__c, integrate multiple data sources without triggering unintended trigger cascades, and ensure the score remains compliant with COBS 9.2 suitability requirements and FCA Consumer Duty outcomes.",
+    "signals": {
+      "detected_objects_rich": 5,
+      "description_rich": 181
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 87,
+    "calibration_multiplier": 1.0,
+    "final_score": 87,
+    "signals": {
+      "detected_objects_rich": 5,
+      "description_rich": 181
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:34:36.727626"
+}

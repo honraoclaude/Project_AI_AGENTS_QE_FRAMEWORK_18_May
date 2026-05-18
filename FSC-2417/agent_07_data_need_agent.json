@@ -1,0 +1,113 @@
+{
+  "agent_id": 7,
+  "agent_name": "Data Need Agent",
+  "phase": "Refinement",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 28975,
+  "what": "Data needs for FSC-2417: 4 record type(s) required, volume=moderate, isolation=per_class_setup, sensitive=True",
+  "why": "Data Need Agent mapped FSC object dependency rules to identify the minimum Salesforce records required before acceptance criteria can execute. Insertion order: 1. Individual (client) \u2014 root parent; must exist before any FSC object can be linked \u2192 2. FinancialAccount \u2014 linked to Individual; must exist before RiskProfile__c or Suitability__c can reference it; ConsolidatedSuitabilityScore__c initialised to 0 \u2192 3. RiskProfile__c \u2014 linked to Individual + FinancialAccount; must exist before Suitability__c is inserted so the 40% risk dimension can be resolved.",
+  "data": {
+    "required_records": [
+      {
+        "object_api_name": "Individual",
+        "min_record_count": 2,
+        "key_field_values": {
+          "FirstName": "Test",
+          "LastName": "Client_Synthetic",
+          "BirthDate": "1970-01-01"
+        },
+        "setup_method": "TestSetup"
+      },
+      {
+        "object_api_name": "FinancialAccount",
+        "min_record_count": 2,
+        "key_field_values": {
+          "Name": "Test Investment Account",
+          "FinancialAccountType": "Investment",
+          "ConsolidatedSuitabilityScore__c": 0,
+          "Balance": 100000
+        },
+        "setup_method": "TestFactory"
+      },
+      {
+        "object_api_name": "RiskProfile__c",
+        "min_record_count": 2,
+        "key_field_values": {
+          "RiskTolerance__c": "Moderate",
+          "InvestmentHorizon__c": "10",
+          "CapacityForLoss__c": "Medium"
+        },
+        "setup_method": "TestFactory"
+      },
+      {
+        "object_api_name": "Suitability__c",
+        "min_record_count": 3,
+        "key_field_values": {
+          "RiskProfileScore__c": 60,
+          "InvestmentObjectivesScore__c": 70,
+          "FinancialCircumstancesScore__c": 50,
+          "AssessmentStatus__c": "Active"
+        },
+        "setup_method": "TestFactory"
+      }
+    ],
+    "data_isolation_strategy": "per_class_setup",
+    "sensitive_data_present": true,
+    "sensitive_data_fields": [
+      "FinancialAccount.Balance \u2014 must use synthetic round numbers (e.g. 100000), never real AUM figures",
+      "Individual.BirthDate \u2014 must use fixed synthetic date, never real client DOB",
+      "Individual.FirstName / LastName \u2014 must use clearly synthetic test-only names (e.g. 'Test Client_Synthetic')",
+      "RiskProfile__c.CapacityForLoss__c \u2014 must use synthetic classification values, not derived from real client data",
+      "Suitability__c.RiskProfileScore__c / InvestmentObjectivesScore__c / FinancialCircumstancesScore__c \u2014 must use synthetic integer scores, never real assessment outputs",
+      "FinancialAccount.ConsolidatedSuitabilityScore__c \u2014 must be seeded with synthetic values (e.g. 0) and validated against known synthetic inputs"
+    ],
+    "factory_classes_recommended": [
+      "SuitabilityTestDataFactory.createIndividualClient() \u2014 creates a synthetic Individual with masked PII fields",
+      "SuitabilityTestDataFactory.createFinancialAccount(Individual clientId) \u2014 creates a FinancialAccount linked to an Individual with ConsolidatedSuitabilityScore__c initialised to 0",
+      "SuitabilityTestDataFactory.createRiskProfile(Id financialAccountId) \u2014 creates a RiskProfile__c with synthetic tolerance/horizon/capacity values",
+      "SuitabilityTestDataFactory.createSuitabilityRecord(Id financialAccountId, Decimal riskScore, Decimal objectivesScore, Decimal circumstancesScore) \u2014 creates a Suitability__c record with all three dimension scores set to known synthetic values",
+      "SuitabilityTestDataFactory.createFullSuitabilityChain() \u2014 convenience method composing all of the above in correct dependency order; returns a map of all created records",
+      "SuitabilityTestDataFactory.createStaleSuitabilityRecord(Id financialAccountId) \u2014 creates a Suitability__c with a LastAssessedDate__c in the past to exercise stale-data alert logic"
+    ],
+    "data_dependencies_ordered": [
+      "1. Individual (client) \u2014 root parent; must exist before any FSC object can be linked",
+      "2. FinancialAccount \u2014 linked to Individual; must exist before RiskProfile__c or Suitability__c can reference it; ConsolidatedSuitabilityScore__c initialised to 0",
+      "3. RiskProfile__c \u2014 linked to Individual + FinancialAccount; must exist before Suitability__c is inserted so the 40% risk dimension can be resolved",
+      "4. Suitability__c \u2014 linked to FinancialAccount (and via relationship to RiskProfile__c); triggering an insert/update fires SuitabilityScoreCalculator and should recalculate ConsolidatedSuitabilityScore__c on FinancialAccount"
+    ],
+    "data_volume": "moderate",
+    "risks": [
+      "Suitability__c requires a correctly linked RiskProfile__c before insert \u2014 if RiskProfile__c is missing or inserted after Suitability__c, SuitabilityScoreCalculator will fail to resolve the 40% risk dimension and return an incorrect or null score",
+      "ConsolidatedSuitabilityScore__c on FinancialAccount must be initialised to 0 in test setup; if left null, numeric assertion comparisons in score calculation tests may throw unexpected NullPointerException",
+      "The SuitabilityScoreCalculator Apex trigger is fired by Suitability__c update \u2014 @TestSetup data must not update Suitability__c records after creation, or the trigger will fire during setup and pollute the baseline score before the test begins",
+      "Per-class setup (@TestSetup) runs once and data is shared across all test methods in the class \u2014 any test that modifies FinancialAccount.ConsolidatedSuitabilityScore__c directly must use Test.startTest()/stopTest() boundaries and avoid leaving dirty state that affects score-assertion tests",
+      "Platform Event SuitabilityScoreUpdated__e cannot be published within a @TestSetup context \u2014 tests covering real-time dashboard refresh via the Platform Event must use per_test_setup_teardown or mock the event publication using a Test.enableChangeDataCapture() pattern",
+      "Stale-data alert tests require a Suitability__c record with a controlled LastAssessedDate__c in the past \u2014 this variant must be created separately from the 'active' baseline records to avoid date-dependency failures when tests run at month or year boundaries",
+      "Bulk recalculation tests (if included for governor limit coverage) must use at least 200 Suitability__c records linked to distinct FinancialAccounts \u2014 ensure the factory method supports bulk insert mode to avoid hitting DML row limits during test setup",
+      "Financial amounts (Balance, AUM) must use synthetic round numbers to prevent assertions becoming brittle if business rounding logic changes"
+    ],
+    "required_record_count": 4,
+    "signals": {
+      "fsc_objects_rich": 3,
+      "description_rich": 181,
+      "dependency_chain_found": 4,
+      "sensitive_data_identified": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 85,
+    "calibration_multiplier": 1.0,
+    "final_score": 85,
+    "signals": {
+      "fsc_objects_rich": 3,
+      "description_rich": 181,
+      "dependency_chain_found": 4,
+      "sensitive_data_identified": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:35:11.336508"
+}

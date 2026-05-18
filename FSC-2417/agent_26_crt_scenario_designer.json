@@ -1,0 +1,39 @@
+{
+  "agent_id": 26,
+  "agent_name": "CRT Scenario Designer",
+  "phase": "Testing",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 39579,
+  "what": "CRT design for FSC-2417: 0 test case(s) designed, 0% automation coverage \u2014 verdict=INCOMPLETE",
+  "why": "No Gherkin scenarios were provided for story FSC-2417. CRT test case design cannot proceed without BDD scenario definitions. This story carries a HIGH-FCA classification, meaning it directly touches Suitability, Appropriateness, Risk Profile, Vulnerable Customer indicators, or Consumer Duty journeys \u2014 all of which require Compliance Officer sign-off and mandatory explicit compliance assertions in any automated test suite. Immediate action required: (1) Product Owner must supply Gherkin scenarios covering all acceptance criteria before CRT design can begin. (2) Given the HIGH-FCA classification, scenarios must include @fca and @negative tags to trigger compliance assertion injection per PACT rules. (3) A REGRESSION suite has been requested, so scenarios should cover both happy-path and edge/negative cases across the relevant FSC objects (e.g., Suitability__c, RiskProfile__c, VulnerableCustomerIndicator__c, Appropriateness__c). (4) Seed data records are available and ready to be referenced once scenarios are authored. (5) This INCOMPLETE verdict will be escalated to the QE Lead and Compliance Officer per PACT protocol (confidence: 0/100 \u2014 no automatable content available). No test cases will be generated until Gherkin scenarios are provided.",
+  "data": {
+    "crt_test_cases": [],
+    "crt_test_count": 0,
+    "automation_coverage": 0,
+    "crt_design_verdict": "INCOMPLETE",
+    "design_notes": "No Gherkin scenarios were provided for story FSC-2417. CRT test case design cannot proceed without BDD scenario definitions. This story carries a HIGH-FCA classification, meaning it directly touches Suitability, Appropriateness, Risk Profile, Vulnerable Customer indicators, or Consumer Duty journeys \u2014 all of which require Compliance Officer sign-off and mandatory explicit compliance assertions in any automated test suite. Immediate action required: (1) Product Owner must supply Gherkin scenarios covering all acceptance criteria before CRT design can begin. (2) Given the HIGH-FCA classification, scenarios must include @fca and @negative tags to trigger compliance assertion injection per PACT rules. (3) A REGRESSION suite has been requested, so scenarios should cover both happy-path and edge/negative cases across the relevant FSC objects (e.g., Suitability__c, RiskProfile__c, VulnerableCustomerIndicator__c, Appropriateness__c). (4) Seed data records are available and ready to be referenced once scenarios are authored. (5) This INCOMPLETE verdict will be escalated to the QE Lead and Compliance Officer per PACT protocol (confidence: 0/100 \u2014 no automatable content available). No test cases will be generated until Gherkin scenarios are provided.",
+    "gherkin_scenario_count": 0,
+    "signals": {
+      "no_gherkin_scenarios": 0,
+      "test_data_available": true,
+      "no_crt_tests": 0,
+      "incomplete_design": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 38,
+    "calibration_multiplier": 1.0,
+    "final_score": 38,
+    "signals": {
+      "no_gherkin_scenarios": 0,
+      "test_data_available": true,
+      "no_crt_tests": 0,
+      "incomplete_design": true
+    },
+    "escalated": true
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:38:29.901812"
+}

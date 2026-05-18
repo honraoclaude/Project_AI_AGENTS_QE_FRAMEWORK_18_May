@@ -1,0 +1,49 @@
+{
+  "agent_id": 14,
+  "agent_name": "Code Quality Reviewer",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 12479,
+  "what": "Code quality for FSC-2417: 2 PMD violation(s) \u2014 critical=1, high=0, verdict=FAIL",
+  "why": "Story FSC-2417 is classified HIGH-FCA and directly modifies Suitability__c, a COBS 9.2-mandated object, making CRUD/FLS enforcement non-negotiable. The ApexCRUDViolation at line 47 of SuitabilityScoreCalculator.cls means the code queries Suitability__c without first confirming the running user has read permission, which could expose regulated suitability data to unauthorised personas and constitutes a critical blocker under the FSC QE Framework verdict rules. The secondary AvoidGlobalModifier violation is a low-priority style issue and does not block promotion, but should be remediated to maintain clean code hygiene.",
+  "data": {
+    "quality_verdict": "FAIL",
+    "critical_violations": [
+      {
+        "rule_name": "ApexCRUDViolation",
+        "description": "Perform CRUD permission check before querying Suitability__c \u2014 on a HIGH-FCA story, missing CRUD/FLS checks on a suitability object constitutes a critical violation and must be resolved before promotion.",
+        "file_path": "force-app/main/default/classes/SuitabilityScoreCalculator.cls",
+        "line": 47
+      }
+    ],
+    "high_violations": [],
+    "total_violation_count": 2,
+    "quality_summary": "Story FSC-2417 is classified HIGH-FCA and directly modifies Suitability__c, a COBS 9.2-mandated object, making CRUD/FLS enforcement non-negotiable. The ApexCRUDViolation at line 47 of SuitabilityScoreCalculator.cls means the code queries Suitability__c without first confirming the running user has read permission, which could expose regulated suitability data to unauthorised personas and constitutes a critical blocker under the FSC QE Framework verdict rules. The secondary AvoidGlobalModifier violation is a low-priority style issue and does not block promotion, but should be remediated to maintain clean code hygiene.",
+    "recommended_fixes": [
+      "[CRITICAL \u2014 Must Fix] SuitabilityScoreCalculator.cls:47 \u2014 Add an explicit CRUD/FLS check before querying Suitability__c. Use Schema.sObjectType.Suitability__c.isAccessible() (and field-level Schema.sObjectType.Suitability__c.fields.<fieldName>.isAccessible() for each queried field) and throw a handled AuraHandledException or return a safe error response if the check fails. Alternatively, use the WITH SECURITY_ENFORCED keyword in the SOQL query or the Security.stripInaccessible() method post-query to enforce FLS. This is required for FCA CO sign-off on all HIGH-FCA stories touching suitability records.",
+      "[LOW \u2014 Clean Up] SuitabilityScoreCalculator.cls:1 \u2014 Replace the global access modifier on the class declaration with public. The global modifier exposes the class to all namespaces and managed packages, increasing the unintended attack surface; public is sufficient for internal FSC platform use and aligns with Salesforce best practices."
+    ],
+    "fca_classification": "HIGH",
+    "pmd_data_available": true,
+    "signals": {
+      "metadata_context_available": true,
+      "quality_verdict_fail": true,
+      "recommended_fixes_present": 2
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 63,
+    "calibration_multiplier": 1.0,
+    "final_score": 63,
+    "signals": {
+      "metadata_context_available": true,
+      "quality_verdict_fail": true,
+      "recommended_fixes_present": 2
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:37:16.540966"
+}

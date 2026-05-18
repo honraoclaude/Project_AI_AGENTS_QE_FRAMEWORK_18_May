@@ -1,0 +1,38 @@
+{
+  "agent_id": 39,
+  "agent_name": "Release Readiness Assessor",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 15701,
+  "what": "Release readiness for FSC-2417: ready=False, 3 blocker(s) \u2014 verdict=BLOCKED",
+  "why": "FSC-2417 is blocked from release: the Development phase has failed, test coverage is 0% (critically below the FCA-mandated threshold), and UAT sign-off cannot proceed until defects are resolved. No phases have passed; the story must return to development to fix the failing build and establish comprehensive test coverage before UAT coordination can resume. Release is prohibited until Development passes, coverage meets or exceeds the regulatory minimum (75\u201385% depending on FCA classification), and all defects are closed.",
+  "data": {
+    "release_ready": false,
+    "readiness_blockers": [
+      "Development phase verdict: FAIL",
+      "Test coverage 0% below FCA threshold",
+      "UAT sign-off blocked \u2014 defects must be resolved first"
+    ],
+    "readiness_verdict": "BLOCKED",
+    "readiness_concern": "testing_incomplete",
+    "narrative": "FSC-2417 is blocked from release: the Development phase has failed, test coverage is 0% (critically below the FCA-mandated threshold), and UAT sign-off cannot proceed until defects are resolved. No phases have passed; the story must return to development to fix the failing build and establish comprehensive test coverage before UAT coordination can resume. Release is prohibited until Development passes, coverage meets or exceeds the regulatory minimum (75\u201385% depending on FCA classification), and all defects are closed.",
+    "signals": {
+      "comprehensive_phase_data": 4,
+      "release_blocked": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 65,
+    "calibration_multiplier": 1.0,
+    "final_score": 65,
+    "signals": {
+      "comprehensive_phase_data": 4,
+      "release_blocked": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:21.535252"
+}

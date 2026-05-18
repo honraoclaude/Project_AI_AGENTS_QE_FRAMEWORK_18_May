@@ -1,0 +1,120 @@
+{
+  "agent_id": 30,
+  "agent_name": "FCA Scenario Agent",
+  "phase": "Testing",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 39579,
+  "what": "FCA scenarios for FSC-2417: 10 scenario(s), Consumer Duty covered=True, COBS=3 \u2014 verdict=PASS",
+  "why": "Generated 10 FCA regulatory test scenario(s) for a HIGH-FCA story. Consumer Duty: covered. 0 regulatory gap(s).",
+  "data": {
+    "fca_test_scenarios": [
+      {
+        "scenario_id": "FCA-001",
+        "regulation": "COBS 9.2",
+        "title": "Suitability Assessment Completion Before Investment Recommendation",
+        "description": "Verify that a Wealth Adviser cannot submit a personal investment recommendation without a fully completed and approved Suitability__c / SuitabilityAssessment record linked to the client's RiskProfile__c in Salesforce FSC.",
+        "pass_criteria": "System blocks recommendation submission and displays a validation error when no linked, completed SuitabilityAssessment record exists. Compliance Officer sign-off is recorded on the record before the recommendation proceeds.",
+        "fail_criteria": "System allows a personal investment recommendation to be submitted without a completed SuitabilityAssessment or RiskProfile__c record, or without Compliance Officer approval on the IndividualApplication."
+      },
+      {
+        "scenario_id": "FCA-002",
+        "regulation": "COBS 9.2",
+        "title": "Risk Profile Mismatch \u2014 Recommendation Blocked",
+        "description": "Verify that the platform prevents a Wealth Adviser from recommending a financial product whose risk rating exceeds the client's documented risk tolerance on RiskProfile__c (capacity for loss field).",
+        "pass_criteria": "An Apex validation or Flow raises a clear, auditable warning or hard stop when the recommended product's risk tier exceeds the client's RiskProfile__c tolerance. The event is logged for Compliance Officer review.",
+        "fail_criteria": "A high-risk product can be recommended to a client with a low-risk RiskProfile__c without any system-level warning, block, or audit trail entry."
+      },
+      {
+        "scenario_id": "FCA-003",
+        "regulation": "COBS 10",
+        "title": "Appropriateness Check for Non-Advised Services",
+        "description": "Verify that the Appropriateness__c record is created and passed before a client can access a non-advised investment service via the self-service portal, confirming the client understands the risks involved.",
+        "pass_criteria": "Client access to non-advised investment products is gated by a completed, passing Appropriateness__c record. Failed checks result in a clear on-screen message explaining the outcome and next steps.",
+        "fail_criteria": "A client with no Appropriateness__c record, or a failing one, can access or transact on a non-advised investment product without any restriction or warning."
+      },
+      {
+        "scenario_id": "FCA-004",
+        "regulation": "Consumer Duty (PS22/9) \u2014 Consumer Understanding",
+        "title": "Investment Product Communications Are Clear, Fair and Not Misleading",
+        "description": "Verify that all client-facing LWC components and automated communications (emails, portal notifications) related to investment products meet the Consumer Duty consumer understanding outcome \u2014 language is plain English, fees are disclosed, and risks are prominently displayed.",
+        "pass_criteria": "All client-facing materials present fees, charges, and risk warnings in plain English. A Compliance Officer review sign-off is recorded. Automated UAT content scan finds no jargon or hidden charges.",
+        "fail_criteria": "Client-facing UI or communications omit fee disclosures, use technical jargon without explanation, or bury material risk warnings in a way a reasonable retail customer would not notice."
+      },
+      {
+        "scenario_id": "FCA-005",
+        "regulation": "Consumer Duty (PS22/9) \u2014 Vulnerable Customer (FG21/1)",
+        "title": "Vulnerable Customer Flag Triggers Enhanced Care Journey",
+        "description": "Verify that when a VulnerableCustomerIndicator__c flag is set on a client record, all automated Flows, LWC screens, and adviser prompts switch to an enhanced care pathway \u2014 including extended time allowances, simplified language, and escalation to a human adviser.",
+        "pass_criteria": "Setting VulnerableCustomerIndicator__c = TRUE triggers: (1) adviser dashboard alert, (2) simplified UI mode on client-facing screens, (3) suppression of automated-only decision pathways, (4) audit log entry timestamped at flag activation.",
+        "fail_criteria": "A client with VulnerableCustomerIndicator__c = TRUE is processed identically to a standard client \u2014 no adviser alert, no UI adaptation, and no audit trail of enhanced care steps taken."
+      },
+      {
+        "scenario_id": "FCA-006",
+        "regulation": "Consumer Duty (PS22/9) \u2014 Products & Services Outcome",
+        "title": "FinancialGoal Alignment \u2014 Products Must Meet Client Needs",
+        "description": "Verify that the platform cross-checks recommended FinancialAccount products against the client's FinancialGoal__c records to ensure the product is designed to meet the stated goal (e.g. retirement, property purchase) and does not create foreseeable harm.",
+        "pass_criteria": "The system surfaces a warning or requires Compliance Officer override when a recommended product's term, risk, or liquidity profile is materially inconsistent with the linked FinancialGoal__c. Misalignment is recorded on the IndividualApplication.",
+        "fail_criteria": "Products with clearly mismatched liquidity or risk profiles (e.g. a 20-year illiquid product for a client with a 2-year property goal) can be recommended and approved without any system warning or documented rationale."
+      },
+      {
+        "scenario_id": "FCA-007",
+        "regulation": "Consumer Duty (PS22/9) \u2014 Price & Value Outcome",
+        "title": "AUM Fee Transparency \u2014 Revenue__c Calculations Are Disclosed",
+        "description": "Verify that Revenue__c AUM-based fee calculations are visible to the client on their portal and match the fee schedule documented in their suitability report, ensuring no undisclosed charges exist.",
+        "pass_criteria": "The client portal displays Revenue__c fee breakdowns that reconcile 100% with the fee schedule on the SuitabilityAssessment record. Any discrepancy triggers an automated alert to the Compliance Officer.",
+        "fail_criteria": "Revenue__c charges applied to a client's FinancialAccount differ from the fee schedule documented in their SuitabilityAssessment, or the fee breakdown is not accessible to the client on the portal."
+      },
+      {
+        "scenario_id": "FCA-008",
+        "regulation": "MiFID II Article 25 \u2014 Suitability & Appropriateness",
+        "title": "Annual Suitability Review \u2014 Stale Assessment Blocks New Recommendations",
+        "description": "Verify that the platform enforces an annual suitability review cycle: SuitabilityAssessment records older than 12 months are flagged as stale, and new investment recommendations are blocked until a refreshed assessment is completed and approved.",
+        "pass_criteria": "Attempting to create a new investment recommendation when the linked SuitabilityAssessment is > 12 months old triggers a hard stop in the Apex layer or Flow, with a message directing the adviser to complete a new assessment. Stale assessments appear on the Compliance Officer dashboard.",
+        "fail_criteria": "A new investment recommendation can be submitted and approved against a SuitabilityAssessment record last updated more than 12 months ago without any system warning or block."
+      },
+      {
+        "scenario_id": "FCA-009",
+        "regulation": "SYSC \u2014 Senior Managers & Certification Regime",
+        "title": "Compliance Officer Audit Trail for HIGH-FCA Approvals",
+        "description": "Verify that every HIGH-FCA change (modifications to Suitability__c, RiskProfile__c, or VulnerableCustomerIndicator__c records) generates an immutable audit trail capturing the acting user, timestamp, previous value, new value, and approval chain, accessible only to authorised Compliance Officers.",
+        "pass_criteria": "FSC audit logs and Salesforce Field History Tracking capture all field-level changes to HIGH-FCA objects. Compliance Officer can produce a complete change history for any client record within 2 minutes. Log entries cannot be deleted by non-system admins.",
+        "fail_criteria": "Changes to SuitabilityAssessment, RiskProfile__c, or VulnerableCustomerIndicator__c fields are not captured in audit logs, or the audit log is editable/deletable by users without System Administrator + Compliance Officer permission sets."
+      },
+      {
+        "scenario_id": "FCA-010",
+        "regulation": "Consumer Duty (PS22/9) \u2014 Consumer Support Outcome",
+        "title": "Vulnerable Customer Cannot Be Disadvantaged by Automated-Only Processes",
+        "description": "Verify that no automated Flow or Apex batch process makes a final, outcome-determinative decision (e.g. account closure, product restriction, fee change) for a client with VulnerableCustomerIndicator__c = TRUE without a mandatory human adviser review step.",
+        "pass_criteria": "All batch or automated processes check for VulnerableCustomerIndicator__c = TRUE before execution. If the flag is set, the process pauses and creates a Task for the assigned Wealth Adviser with a mandatory completion step before the automation resumes.",
+        "fail_criteria": "An automated batch job closes, restricts, or modifies the account of a client flagged as vulnerable without creating an adviser Task or requiring human sign-off, resulting in a potentially harmful outcome with no human intervention."
+      }
+    ],
+    "consumer_duty_covered": true,
+    "cobs_scenarios_count": 3,
+    "fca_scenario_verdict": "PASS",
+    "regulatory_gaps": [],
+    "fca_scenario_count": 10,
+    "signals": {
+      "fca_classification_available": true,
+      "consumer_duty_assessment_available": true,
+      "risk_anticipation_available": true,
+      "fca_scenarios_generated": 10
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 92,
+    "calibration_multiplier": 1.0,
+    "final_score": 92,
+    "signals": {
+      "fca_classification_available": true,
+      "consumer_duty_assessment_available": true,
+      "risk_anticipation_available": true,
+      "fca_scenarios_generated": 10
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:39:00.521925"
+}

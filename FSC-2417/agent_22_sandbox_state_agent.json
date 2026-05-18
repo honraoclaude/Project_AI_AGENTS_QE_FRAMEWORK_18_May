@@ -1,0 +1,39 @@
+{
+  "agent_id": 22,
+  "agent_name": "Sandbox State Agent",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2409,
+  "what": "Sandbox state for FSC-2417: health=85/100, 1 blocker(s) \u2014 verdict=READY",
+  "why": "Sandbox FSC-2417 is healthy (85/100 health score) with SFDX validation passing and no metadata dependency blockers detected. However, the branch exhibits a naming convention violation that introduces traceability risk and must be remediated\u2014rename the branch to align with organisational standards before deployment. Once the branch naming issue is resolved, the sandbox is ready for promotion.",
+  "data": {
+    "sandbox_ready": true,
+    "sandbox_health_score": 85,
+    "sandbox_blockers": [
+      "Branch naming convention violation \u2014 traceability risk"
+    ],
+    "sandbox_verdict": "READY",
+    "deployment_risk": "low",
+    "narrative": "Sandbox FSC-2417 is healthy (85/100 health score) with SFDX validation passing and no metadata dependency blockers detected. However, the branch exhibits a naming convention violation that introduces traceability risk and must be remediated\u2014rename the branch to align with organisational standards before deployment. Once the branch naming issue is resolved, the sandbox is ready for promotion.",
+    "signals": {
+      "branch_context_available": true,
+      "metadata_scope_available": true,
+      "sfdx_format_signal_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 83,
+    "calibration_multiplier": 1.0,
+    "final_score": 83,
+    "signals": {
+      "branch_context_available": true,
+      "metadata_scope_available": true,
+      "sfdx_format_signal_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:38:13.819141"
+}

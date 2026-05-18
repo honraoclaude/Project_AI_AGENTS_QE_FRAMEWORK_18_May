@@ -1,0 +1,42 @@
+{
+  "agent_id": 12,
+  "agent_name": "Apex Coverage Analyser",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 12479,
+  "what": "Coverage analysis for FSC-2417: 87.3% (threshold=85%, gap=0%) \u2014 PASS",
+  "why": "Apex test coverage for FSC-2417 stands at 87.3%, exceeding the HIGH-FCA threshold of 85% with all 42 tests passing. The codebase meets regulatory requirements for suitability and appropriateness logic, and no further action is required before CO sign-off. Maintain this coverage level in subsequent releases.",
+  "data": {
+    "coverage_pct": 87.3,
+    "coverage_threshold": 85,
+    "coverage_gap_pct": 0,
+    "coverage_passed": true,
+    "coverage_verdict": "PASS",
+    "tests_run": 42,
+    "tests_passed": 42,
+    "tests_failed": 0,
+    "fca_classification": "HIGH",
+    "coverage_concern": "none",
+    "narrative": "Apex test coverage for FSC-2417 stands at 87.3%, exceeding the HIGH-FCA threshold of 85% with all 42 tests passing. The codebase meets regulatory requirements for suitability and appropriateness logic, and no further action is required before CO sign-off. Maintain this coverage level in subsequent releases.",
+    "signals": {
+      "coverage_data_available": true,
+      "adequate_test_count": 42,
+      "coverage_passed": 87.3
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 91,
+    "calibration_multiplier": 1.0,
+    "final_score": 91,
+    "signals": {
+      "coverage_data_available": true,
+      "adequate_test_count": 42,
+      "coverage_passed": 87.3
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:07.306236"
+}

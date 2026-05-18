@@ -1,0 +1,41 @@
+{
+  "agent_id": 32,
+  "agent_name": "Regression Risk Assessor",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 3502,
+  "what": "Regression risk for FSC-2417: risk=MEDIUM, suite=REGRESSION, 0 shared component(s) \u2014 verdict=WARN",
+  "why": "Changes to FinancialAccount carry high blast-radius risk across AUM calculations, linked FinancialGoals, and transaction roll-ups; Suitability__c modifications at dependency depth 2 may cascade to appropriateness checks and compliance workflows. Run the full REGRESSION test suite with emphasis on FinancialAccount integrity, suitability-driven business rules, and end-to-end goal/transaction reconciliation.",
+  "data": {
+    "regression_risk_level": "MEDIUM",
+    "regression_risk_factors": [
+      "High blast-radius FSC objects: ['financialaccount']",
+      "Moderate dependency chain (depth=2)"
+    ],
+    "shared_components": [],
+    "recommended_regression_suite": "REGRESSION",
+    "regression_verdict": "WARN",
+    "regression_concern": "high_blast_radius",
+    "narrative": "Changes to FinancialAccount carry high blast-radius risk across AUM calculations, linked FinancialGoals, and transaction roll-ups; Suitability__c modifications at dependency depth 2 may cascade to appropriateness checks and compliance workflows. Run the full REGRESSION test suite with emphasis on FinancialAccount integrity, suitability-driven business rules, and end-to-end goal/transaction reconciliation.",
+    "signals": {
+      "metadata_scope_available": true,
+      "component_attribution_available": true,
+      "fca_classification_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 85,
+    "calibration_multiplier": 1.0,
+    "final_score": 85,
+    "signals": {
+      "metadata_scope_available": true,
+      "component_attribution_available": true,
+      "fca_classification_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:38:20.906198"
+}

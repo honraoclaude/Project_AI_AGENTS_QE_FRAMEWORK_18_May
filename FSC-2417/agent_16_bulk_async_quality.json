@@ -1,0 +1,41 @@
+{
+  "agent_id": 16,
+  "agent_name": "Bulk/Async Quality",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 12479,
+  "what": "Bulk risk for FSC-2417: risk_level=HIGH, depth=2, async_recommended=True",
+  "why": "This HIGH-FCA story modifies FinancialAccount and Suitability__c records at dependency depth 2, creating significant CPU and DML governor limit risk when processing bulk inserts or updates. Implement Queueable Apex or Batch processing to break up large Suitability assessment transactions across multiple execution contexts, and add governor limit guards (CPU time tracking, DML statement counts) to prevent transaction failures. Enhanced testing with bulk scenarios (500+ records) is mandatory before deployment, with sign-off from Compliance Officer due to regulatory impact on COBS 9.2 suitability assessments.",
+  "data": {
+    "bulk_risk_level": "HIGH",
+    "bulk_risk_factors": [
+      "HIGH-FCA story with depth \u2265 2 \u2014 Suitability/RiskProfile inserts at scale trigger CPU and DML governor limits; consider Queueable Apex"
+    ],
+    "async_recommended": true,
+    "dependency_depth_assessed": 2,
+    "detected_objects_count": 2,
+    "fca_classification": "HIGH",
+    "bulk_risk_concern": "high",
+    "narrative": "This HIGH-FCA story modifies FinancialAccount and Suitability__c records at dependency depth 2, creating significant CPU and DML governor limit risk when processing bulk inserts or updates. Implement Queueable Apex or Batch processing to break up large Suitability assessment transactions across multiple execution contexts, and add governor limit guards (CPU time tracking, DML statement counts) to prevent transaction failures. Enhanced testing with bulk scenarios (500+ records) is mandatory before deployment, with sign-off from Compliance Officer due to regulatory impact on COBS 9.2 suitability assessments.",
+    "signals": {
+      "metadata_scope_available": true,
+      "fca_class_available": true,
+      "dependency_depth_known": 2
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 83,
+    "calibration_multiplier": 1.0,
+    "final_score": 83,
+    "signals": {
+      "metadata_scope_available": true,
+      "fca_class_available": true,
+      "dependency_depth_known": 2
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:08.080402"
+}

@@ -1,0 +1,36 @@
+{
+  "agent_id": 42,
+  "agent_name": "Dry-Run Agent",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 1977,
+  "what": "Dry-run for FSC-2417: success=True, 0 error(s) \u2014 verdict=PASS",
+  "why": "The dry-run deployment for FSC-2417 completed successfully with no errors detected. All validation checks passed, including FSC object schema, permission set assignments, and change set integrity. Smoke testing can proceed immediately.",
+  "data": {
+    "dry_run_success": true,
+    "dry_run_errors": [],
+    "dry_run_verdict": "PASS",
+    "dry_run_concern": "none",
+    "narrative": "The dry-run deployment for FSC-2417 completed successfully with no errors detected. All validation checks passed, including FSC object schema, permission set assignments, and change set integrity. Smoke testing can proceed immediately.",
+    "signals": {
+      "env_data_available": true,
+      "integrity_data_available": true,
+      "dry_run_succeeded": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 79,
+    "calibration_multiplier": 1.0,
+    "final_score": 79,
+    "signals": {
+      "env_data_available": true,
+      "integrity_data_available": true,
+      "dry_run_succeeded": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:40.473165"
+}

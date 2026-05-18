@@ -1,0 +1,32 @@
+{
+  "agent_id": 47,
+  "agent_name": "Release Notes Writer",
+  "phase": "Release",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 15701,
+  "what": "Release notes for FSC-2417: verdict=PARTIAL",
+  "why": "Release notes generated.",
+  "data": {
+    "release_title": "FSC-2417 \u2014 Release Notes Unavailable",
+    "release_notes": "## Release Notes \u2014 FSC-2417\n\n**Status: FAILED \u2014 Insufficient Source Data**\n\nRelease notes could not be generated for this story. No meaningful source data was provided:\n\n- **Acceptance Criteria:** 0 ACs \u2014 not available\n- **BDD Gherkin Scenarios:** 0 scenarios \u2014 not available\n- **Development Phase Verdict:** FAIL\n- **Test Coverage:** 0.0% \u2014 FAIL\n\n### What Changed\nUnable to determine. No development summary, acceptance criteria, or test scenarios were supplied.\n\n### Acceptance Criteria Coverage\nNo acceptance criteria were defined or provided for this story. It is not possible to confirm that any business or technical requirements have been met.\n\n### Test Coverage Summary\n- Overall Coverage: **0.0%**\n- Coverage Verdict: **FAIL**\n- No test scenarios (BDD or otherwise) were available to assess functional or regression coverage.\n- The standard FSC coverage threshold of **75%** (or **85%** for HIGH-FCA components) has **not** been met.\n\n### Known Limitations / Blockers\n- This story **must not be released** to UAT or Production in its current state.\n- All source artefacts (ACs, Gherkin scenarios, development summary, and test coverage) must be provided and reviewed before release notes can be finalised.\n- A full re-submission of this story is required with complete artefacts.\n\n### Recommended Next Steps\n1. Product Owner (PO) to supply Acceptance Criteria and confirm scope of change.\n2. Development team to provide a Development Phase summary and achieve minimum Apex coverage thresholds.\n3. QE Engineer to author and execute BDD Gherkin scenarios.\n4. If story touches HIGH-FCA components (Suitability, Risk Profile, Vulnerable Customer, Consumer Duty), Compliance Officer sign-off is mandatory before re-submission.",
+    "regulatory_notes": "",
+    "notes_verdict": "PARTIAL",
+    "narrative": "Release notes generated.",
+    "signals": {
+      "good_source_coverage": 3
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 72,
+    "calibration_multiplier": 1.0,
+    "final_score": 72,
+    "signals": {
+      "good_source_coverage": 3
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:39:33.907385"
+}

@@ -1,0 +1,37 @@
+{
+  "agent_id": 25,
+  "agent_name": "Test Environment Provisioner",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 3502,
+  "what": "Test environment for FSC-2417: ready=True, crt_connected=True, 1 blocker(s) \u2014 verdict=DEGRADED",
+  "why": "Sandbox FSC-2417 reports 85/100 health and is operationally ready, but test data seeding has identified gaps across 14 record types with incomplete scenario coverage. Data strategy must be reviewed and missing seed records provisioned before automated test execution can reliably validate all acceptance criteria and regulatory pathways.",
+  "data": {
+    "env_ready": true,
+    "env_verdict": "DEGRADED",
+    "env_blockers": [
+      "Test data strategy has gaps \u2014 some scenarios may lack data"
+    ],
+    "crt_connected": true,
+    "provisioning_concern": "data_not_seeded",
+    "narrative": "Sandbox FSC-2417 reports 85/100 health and is operationally ready, but test data seeding has identified gaps across 14 record types with incomplete scenario coverage. Data strategy must be reviewed and missing seed records provisioned before automated test execution can reliably validate all acceptance criteria and regulatory pathways.",
+    "signals": {
+      "sandbox_health_signal_available": true,
+      "test_data_strategy_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 77,
+    "calibration_multiplier": 1.0,
+    "final_score": 77,
+    "signals": {
+      "sandbox_health_signal_available": true,
+      "test_data_strategy_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:38:20.386453"
+}

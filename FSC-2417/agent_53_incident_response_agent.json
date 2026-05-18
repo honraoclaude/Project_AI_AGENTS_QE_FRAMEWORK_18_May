@@ -1,0 +1,47 @@
+{
+  "agent_id": 53,
+  "agent_name": "Incident Response Agent",
+  "phase": "Monitoring",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 13121,
+  "what": "Incident response for FSC-2417: severity=P3 \u2014 verdict=MONITORING",
+  "why": "Incident response complete.",
+  "data": {
+    "incident_severity": "P3",
+    "rollback_recommended": false,
+    "triage_steps": [
+      "Investigate why the post-release health check returned UNKNOWN and the monitor verdict was SKIPPED for FSC-2417 \u2014 check Copado pipeline logs and deployment job history for errors or timeouts.",
+      "Verify that the deployment for FSC-2417 completed successfully in the target org by reviewing Copado's deployment result records and Salesforce Setup > Deploy Status.",
+      "Re-run the post-release health check and monitoring suite manually for FSC-2417 to obtain a definitive pass/fail verdict.",
+      "Confirm no Apex test failures, validation errors, or Flow activation issues were silently swallowed during the deployment by inspecting the Salesforce debug logs and Copado result XML.",
+      "Review the FSC-2417 story scope \u2014 if it touches Suitability, Appropriateness, RiskProfile__c, VulnerableCustomerIndicator__c, or FinancialAccount data, escalate immediately to Compliance Officer and re-classify severity.",
+      "If health checks pass on re-run and no FCA-regulated objects are impacted, mark the SKIPPED verdict as a monitoring gap and raise a remediation task to ensure the health check pipeline cannot be silently skipped in future releases.",
+      "Document findings and update the FSC-2417 release record in Copado with the confirmed deployment status and health check outcome."
+    ],
+    "escalate_to": [
+      "TECH_LEAD",
+      "QE_LEAD"
+    ],
+    "estimated_resolution": "30 minutes",
+    "incident_verdict": "MONITORING",
+    "narrative": "Incident response complete.",
+    "signals": {
+      "p3_low_severity": true,
+      "detailed_triage_plan": 7
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 78,
+    "calibration_multiplier": 1.0,
+    "final_score": 78,
+    "signals": {
+      "p3_low_severity": true,
+      "detailed_triage_plan": 7
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:40:48.016004"
+}

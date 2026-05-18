@@ -1,0 +1,41 @@
+{
+  "agent_id": 33,
+  "agent_name": "Test Coverage Analyser",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 5792,
+  "what": "Test coverage for FSC-2417: 0% overall, 0 uncovered AC(s) \u2014 verdict=FAIL",
+  "why": "Story FSC-2417 has 0.0% overall coverage with no Gherkin scenarios, 0% CRT automation, and zero UAT tests, despite having 10 FCA regulatory scenarios defined. This represents a critical compliance gap: Gherkin and CRT coverage are entirely absent, leaving functional behaviour unmapped and automated testing non-existent. To reach the FCA classification threshold, the QE engineer must immediately author Gherkin scenarios covering all acceptance criteria, implement CRT test cases with minimum 75% Apex coverage (85% if HIGH-FCA), and conduct UAT validation before the story can be merged.",
+  "data": {
+    "overall_coverage_pct": 0.0,
+    "coverage_by_type": {
+      "gherkin": 0,
+      "crt_automation_pct": 0,
+      "crt_executed": 0,
+      "uat": 0,
+      "fca_regulatory": 10
+    },
+    "uncovered_acs": [],
+    "coverage_verdict": "FAIL",
+    "coverage_concern": "below_threshold",
+    "narrative": "Story FSC-2417 has 0.0% overall coverage with no Gherkin scenarios, 0% CRT automation, and zero UAT tests, despite having 10 FCA regulatory scenarios defined. This represents a critical compliance gap: Gherkin and CRT coverage are entirely absent, leaving functional behaviour unmapped and automated testing non-existent. To reach the FCA classification threshold, the QE engineer must immediately author Gherkin scenarios covering all acceptance criteria, implement CRT test cases with minimum 75% Apex coverage (85% if HIGH-FCA), and conduct UAT validation before the story can be merged.",
+    "signals": {
+      "comprehensive_test_data": 4,
+      "low_coverage": 0.0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 70,
+    "calibration_multiplier": 1.0,
+    "final_score": 70,
+    "signals": {
+      "comprehensive_test_data": 4,
+      "low_coverage": 0.0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:09.075785"
+}

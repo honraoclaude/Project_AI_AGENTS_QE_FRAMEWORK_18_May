@@ -1,0 +1,37 @@
+{
+  "agent_id": 45,
+  "agent_name": "Go/No-Go Coordinator",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2336,
+  "what": "Go/No-Go for FSC-2417: go=False, 2 blocker(s) \u2014 verdict=NO_GO",
+  "why": "FSC-2417 is blocked from production deployment due to failure in the development phase, with test coverage at 0% (below FCA threshold of 75\u201385%), and unresolved UAT defects preventing sign-off. Compliance Officer sign-off cannot proceed without remediation of these blockers. No-Go decision: production deployment is NOT approved until development phase passes, coverage thresholds are met, and UAT defects are resolved.",
+  "data": {
+    "go_decision": false,
+    "no_go_reasons": [
+      "Release readiness BLOCKED: ['Development phase verdict: FAIL', 'Test coverage 0% below FCA threshold', 'UAT sign-off blocked \u2014 defects must be resolved first']",
+      "UAT coordination BLOCKED \u2014 CO sign-off cannot proceed"
+    ],
+    "coordinator_verdict": "NO_GO",
+    "coordinator_concern": "uat_pending",
+    "narrative": "FSC-2417 is blocked from production deployment due to failure in the development phase, with test coverage at 0% (below FCA threshold of 75\u201385%), and unresolved UAT defects preventing sign-off. Compliance Officer sign-off cannot proceed without remediation of these blockers. No-Go decision: production deployment is NOT approved until development phase passes, coverage thresholds are met, and UAT defects are resolved.",
+    "signals": {
+      "comprehensive_gate_data": 4,
+      "no_go_decision": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 67,
+    "calibration_multiplier": 1.0,
+    "final_score": 67,
+    "signals": {
+      "comprehensive_gate_data": 4,
+      "no_go_decision": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:59.647309"
+}

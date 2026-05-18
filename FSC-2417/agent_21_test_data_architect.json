@@ -1,0 +1,222 @@
+{
+  "agent_id": 21,
+  "agent_name": "Test Data Architect",
+  "phase": "Development",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 30069,
+  "what": "Test data strategy for FSC-2417: 14 seed record type(s), anonymisation=required, 3 vulnerable profile(s) \u2014 verdict=WARN",
+  "why": "Designed test data for a HIGH-FCA story touching ['financialaccount', 'suitability__c'] objects.",
+  "data": {
+    "test_data_strategy": {
+      "seed_records": [
+        {
+          "object_name": "Account (RecordType=Household)",
+          "record_count": 3,
+          "key_fields": [
+            "Name",
+            "RecordTypeId",
+            "BillingAddress"
+          ],
+          "purpose": "Represent household groupings for wealth management scenarios. One standard household, one single-member household, one multi-member household."
+        },
+        {
+          "object_name": "Contact",
+          "record_count": 5,
+          "key_fields": [
+            "FirstName",
+            "LastName",
+            "Birthdate",
+            "NationalInsuranceNumber__c",
+            "AccountId"
+          ],
+          "purpose": "Individual client profiles linked to Household accounts. Includes a range of ages and risk profiles to cover standard and edge-case adviser journeys."
+        },
+        {
+          "object_name": "FinancialAccount",
+          "record_count": 5,
+          "key_fields": [
+            "Name",
+            "PrimaryOwner__c",
+            "FinancialAccountType",
+            "Balance__c",
+            "Status"
+          ],
+          "purpose": "One per Contact \u2014 covering account types (e.g. ISA, pension, investment portfolio) to support AUM roll-up and transaction testing."
+        },
+        {
+          "object_name": "FinancialHolding",
+          "record_count": 6,
+          "key_fields": [
+            "FinancialAccountId",
+            "HoldingName",
+            "Units",
+            "CurrentValue__c",
+            "AssetClass__c"
+          ],
+          "purpose": "Holdings across multiple FinancialAccounts \u2014 equities, bonds, funds \u2014 to support portfolio composition and valuation scenarios."
+        },
+        {
+          "object_name": "FinancialAccountTransaction",
+          "record_count": 10,
+          "key_fields": [
+            "FinancialAccountId",
+            "Amount",
+            "TransactionDate",
+            "TransactionType",
+            "Status"
+          ],
+          "purpose": "A mix of credit and debit transactions across FinancialAccounts to support transaction history, roll-up, and reporting test scenarios."
+        },
+        {
+          "object_name": "RiskProfile__c",
+          "record_count": 4,
+          "key_fields": [
+            "ClientId__c",
+            "RiskTolerance__c",
+            "InvestmentHorizon__c",
+            "CapacityForLoss__c",
+            "AssessmentDate__c"
+          ],
+          "purpose": "Risk profiles covering the full spectrum (low, medium, high, not yet assessed) \u2014 required for suitability and COBS 9.2 test scenarios."
+        },
+        {
+          "object_name": "Suitability__c",
+          "record_count": 3,
+          "key_fields": [
+            "ContactId__c",
+            "AssessmentStatus__c",
+            "RecommendationDate__c",
+            "AdviserUserId__c",
+            "RiskProfileId__c"
+          ],
+          "purpose": "Suitability assessment records \u2014 one completed, one in-progress, one expired \u2014 for COBS 9.2 compliance test coverage."
+        },
+        {
+          "object_name": "Appropriateness__c",
+          "record_count": 2,
+          "key_fields": [
+            "ContactId__c",
+            "CheckStatus__c",
+            "ProductType__c",
+            "AssessmentDate__c"
+          ],
+          "purpose": "COBS 10 non-advised appropriateness check records \u2014 one pass, one fail \u2014 to test non-advised journey gating logic."
+        },
+        {
+          "object_name": "VulnerableCustomerIndicator__c",
+          "record_count": 3,
+          "key_fields": [
+            "ContactId__c",
+            "VulnerabilityType__c",
+            "ReviewDate__c",
+            "EnhancedCareFlag__c"
+          ],
+          "purpose": "Vulnerable customer flag records for Consumer Duty (FG21/1) compliance \u2014 covering three vulnerability categories (cognitive, financial resilience, life events)."
+        },
+        {
+          "object_name": "FinancialGoal__c",
+          "record_count": 4,
+          "key_fields": [
+            "ContactId__c",
+            "GoalType__c",
+            "TargetAmount__c",
+            "TargetDate__c",
+            "LinkedFinancialAccountId__c"
+          ],
+          "purpose": "Client goals (retirement, education, property purchase, emergency fund) linked to FinancialAccounts for goal-tracking and planning scenarios."
+        },
+        {
+          "object_name": "AssetsAndLiabilities",
+          "record_count": 4,
+          "key_fields": [
+            "ClientId__c",
+            "AssetType__c",
+            "LiabilityType__c",
+            "Value__c",
+            "RecordDate__c"
+          ],
+          "purpose": "Balance sheet items for wealth planning scenarios \u2014 covering assets (property, cash) and liabilities (mortgage, loan)."
+        },
+        {
+          "object_name": "Revenue__c",
+          "record_count": 3,
+          "key_fields": [
+            "FinancialAccountId__c",
+            "FeeType__c",
+            "AUMBasisPoints__c",
+            "CalculationDate__c",
+            "RevenueAmount__c"
+          ],
+          "purpose": "AUM-based fee calculation records to support revenue roll-up and pricing validation scenarios."
+        },
+        {
+          "object_name": "User (Wealth Adviser)",
+          "record_count": 2,
+          "key_fields": [
+            "Username",
+            "ProfileId",
+            "PermissionSetAssignments",
+            "IsActive"
+          ],
+          "purpose": "Two active Wealth Adviser users \u2014 one with full permissions, one with restricted permissions \u2014 to test FLS, field access, and adviser-facing UI scenarios."
+        },
+        {
+          "object_name": "User (Compliance Officer)",
+          "record_count": 1,
+          "key_fields": [
+            "Username",
+            "ProfileId",
+            "PermissionSetAssignments",
+            "IsActive"
+          ],
+          "purpose": "One Compliance Officer user for sign-off and HIGH-FCA scenario testing requiring CO approval workflows."
+        }
+      ],
+      "anonymisation_fields": [
+        "Contact.FirstName",
+        "Contact.LastName",
+        "Contact.Birthdate",
+        "Contact.NationalInsuranceNumber__c",
+        "FinancialAccount.Balance__c",
+        "FinancialAccountTransaction.Amount",
+        "AssetsAndLiabilities.Value__c",
+        "Revenue__c.RevenueAmount__c",
+        "VulnerableCustomerIndicator__c.VulnerabilityType__c"
+      ],
+      "setup_notes": ""
+    },
+    "requires_anonymisation": true,
+    "vulnerable_profiles": [
+      "Cognitive impairment \u2014 client with dementia indicator flag; requires enhanced care flag and extended review period on all suitability assessments",
+      "Financial resilience \u2014 client in persistent financial difficulty; low capacity for loss, restricted product eligibility, enhanced appropriateness checks required",
+      "Life event \u2014 recently bereaved client; temporary vulnerability flag active, adviser prompted for additional support steps before any recommendation is recorded"
+    ],
+    "data_verdict": "WARN",
+    "coverage_gaps": [],
+    "seed_record_count": 14,
+    "signals": {
+      "fca_classification_available": true,
+      "data_needs_from_refinement": true,
+      "metadata_scope_available": true,
+      "gherkin_scenarios_available": true,
+      "seed_records_designed": 14
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 92,
+    "calibration_multiplier": 1.0,
+    "final_score": 92,
+    "signals": {
+      "fca_classification_available": true,
+      "data_needs_from_refinement": true,
+      "metadata_scope_available": true,
+      "gherkin_scenarios_available": true,
+      "seed_records_designed": 14
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:38:11.374611"
+}

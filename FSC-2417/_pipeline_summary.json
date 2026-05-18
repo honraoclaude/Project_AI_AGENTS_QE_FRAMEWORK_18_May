@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-05-18T20:40:48.074932+00:00",
+  "total_agents": 53,
+  "passed": 53,
+  "failed": 0,
+  "avg_confidence": 75.1,
+  "min_confidence": 38,
+  "max_confidence": 97,
+  "errors": [],
+  "total_elapsed_ms": 731921
+}

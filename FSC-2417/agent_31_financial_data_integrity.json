@@ -1,0 +1,42 @@
+{
+  "agent_id": 31,
+  "agent_name": "Financial Data Integrity",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 3017,
+  "what": "Financial data integrity for FSC-2417: 4 rule(s) checked, 0 violation(s) \u2014 verdict=PASS",
+  "why": "Financial data integrity checks on FSC-2417 have passed across FinancialAccount and Suitability__c objects. All four rules\u2014balance_consistency, suitability_score_range, revenue_schedule_continuity, and audit_trail_completeness\u2014verified successfully with no violations detected. The developer may proceed to deployment with confidence that FSC data integrity and FCA COBS 9.2 regulatory requirements are met.",
+  "data": {
+    "integrity_valid": true,
+    "integrity_violations": [],
+    "integrity_verdict": "PASS",
+    "rules_checked": [
+      "balance_consistency",
+      "suitability_score_range",
+      "revenue_schedule_continuity",
+      "audit_trail_completeness"
+    ],
+    "integrity_concern": "none",
+    "narrative": "Financial data integrity checks on FSC-2417 have passed across FinancialAccount and Suitability__c objects. All four rules\u2014balance_consistency, suitability_score_range, revenue_schedule_continuity, and audit_trail_completeness\u2014verified successfully with no violations detected. The developer may proceed to deployment with confidence that FSC data integrity and FCA COBS 9.2 regulatory requirements are met.",
+    "signals": {
+      "metadata_scope_available": true,
+      "fca_classification_available": true,
+      "crt_skipped_reduced_confidence": 0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 75,
+    "calibration_multiplier": 1.0,
+    "final_score": 75,
+    "signals": {
+      "metadata_scope_available": true,
+      "fca_classification_available": true,
+      "crt_skipped_reduced_confidence": 0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:05.745299"
+}

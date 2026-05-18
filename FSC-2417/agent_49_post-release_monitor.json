@@ -1,0 +1,33 @@
+{
+  "agent_id": 49,
+  "agent_name": "Post-Release Monitor",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 23394,
+  "what": "Post-release monitoring for FSC-2417: active=False, health=UNKNOWN \u2014 verdict=SKIPPED",
+  "why": "Post-release monitoring for FSC-2417 is currently inactive and no alerts have been triggered. Health status remains UNKNOWN, indicating that monitoring collection or validation has not yet commenced; immediate action is needed to activate monitoring and establish a baseline health snapshot.",
+  "data": {
+    "monitoring_active": false,
+    "alerts_triggered": [],
+    "health_status": "UNKNOWN",
+    "monitor_verdict": "SKIPPED",
+    "monitor_concern": "deployment_not_done",
+    "narrative": "Post-release monitoring for FSC-2417 is currently inactive and no alerts have been triggered. Health status remains UNKNOWN, indicating that monitoring collection or validation has not yet commenced; immediate action is needed to activate monitoring and establish a baseline health snapshot.",
+    "signals": {
+      "production_data_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 62,
+    "calibration_multiplier": 1.0,
+    "final_score": 62,
+    "signals": {
+      "production_data_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:40:05.254022"
+}

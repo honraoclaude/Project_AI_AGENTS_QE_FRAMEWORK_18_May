@@ -1,0 +1,59 @@
+{
+  "agent_id": 3,
+  "agent_name": "FCA Risk Classifier",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 28975,
+  "what": "FCA classification for FSC-2417: HIGH (call-A=HIGH, call-B=HIGH, agreement=True)",
+  "why": "FCA Risk Classifier ran two independent classification calls to prevent anchoring. Both calls agreed. Triggers: ['Suitability__c', 'SuitabilityScoreCalculator', 'RiskProfile__c', 'FinancialAccount.ConsolidatedSuitabilityScore__c', 'SuitabilityScoreUpdated__e', 'COBS 9.2', 'Consumer Duty PS22/9', 'COBS 3.4', 'MiFID II risk profile', 'suitability assessment'].",
+  "data": {
+    "fca_classification": "HIGH",
+    "classification_rationale": "FSC-2417 directly modifies and extends the Suitability__c object by introducing a SuitabilityScoreCalculator Apex class triggered on Suitability__c updates, and stores a derived ConsolidatedSuitabilityScore__c on FinancialAccount \u2014 placing it squarely within the HIGH-FCA tier under Rule 1. The story explicitly references COBS 9.2 suitability assessment obligations and Consumer Duty PS22/9, and Acceptance Criterion 4 enforces a mandatory COBS 9.2 compliance warning gate before advice can be recorded. RiskProfile__c is also a named input dimension (40% weighting), further anchoring this story to the highest regulatory tier.",
+    "fca_triggers": [
+      "Suitability__c",
+      "SuitabilityScoreCalculator",
+      "RiskProfile__c",
+      "FinancialAccount.ConsolidatedSuitabilityScore__c",
+      "SuitabilityScoreUpdated__e",
+      "COBS 9.2",
+      "Consumer Duty PS22/9",
+      "COBS 3.4",
+      "MiFID II risk profile",
+      "suitability assessment"
+    ],
+    "regulatory_obligations": [
+      "COBS 9.2 Suitability Assessment",
+      "Consumer Duty PS22/9 \u2014 Good Outcomes for Retail Clients",
+      "COBS 3.4 Client Classification (Retail Client)",
+      "SYSC \u2014 Governance and Oversight of Advice Processes"
+    ],
+    "co_signoff_required": true,
+    "enhanced_testing_required": true,
+    "ensemble_agreement": true,
+    "call_a_classification": "HIGH",
+    "call_b_classification": "HIGH",
+    "tier_gap": 0,
+    "signals": {
+      "ensemble_agreement": true,
+      "call_a": "HIGH",
+      "call_b": "HIGH",
+      "tier_gap": 0
+    }
+  },
+  "confidence": {
+    "tier": "D",
+    "raw_score": 85,
+    "calibration_multiplier": 1.0,
+    "final_score": 85,
+    "signals": {
+      "ensemble_agreement": true,
+      "call_a": "HIGH",
+      "call_b": "HIGH",
+      "tier_gap": 0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:34:52.289902"
+}

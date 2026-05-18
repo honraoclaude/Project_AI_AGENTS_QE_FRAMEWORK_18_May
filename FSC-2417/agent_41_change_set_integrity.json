@@ -1,0 +1,35 @@
+{
+  "agent_id": 41,
+  "agent_name": "Change Set Integrity",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2539,
+  "what": "Change set integrity for FSC-2417: valid=True, 0 issue(s) \u2014 verdict=PASS",
+  "why": "The FSC-2417-patch-release change set (7 components) passed integrity validation with no destructive changes or dependency issues detected. The change set is valid and ready for dry-run deployment. No further resolution is required before proceeding to the next stage of the release pipeline.",
+  "data": {
+    "integrity_valid": true,
+    "integrity_issues": [],
+    "destructive_changes_present": false,
+    "integrity_verdict": "PASS",
+    "integrity_concern": "none",
+    "narrative": "The FSC-2417-patch-release change set (7 components) passed integrity validation with no destructive changes or dependency issues detected. The change set is valid and ready for dry-run deployment. No further resolution is required before proceeding to the next stage of the release pipeline.",
+    "signals": {
+      "release_package_available": true,
+      "metadata_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 78,
+    "calibration_multiplier": 1.0,
+    "final_score": 78,
+    "signals": {
+      "release_package_available": true,
+      "metadata_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:38.411285"
+}

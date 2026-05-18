@@ -1,0 +1,72 @@
+{
+  "agent_id": 44,
+  "agent_name": "FCA Evidence Pack",
+  "phase": "Release",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 14589,
+  "what": "FCA evidence pack for FSC-2417: 6 item(s), 3 gap(s) \u2014 verdict=PARTIAL",
+  "why": "FCA Evidence Pack compiled.",
+  "data": {
+    "evidence_items": [
+      {
+        "rule": "Consumer Duty PS22/9 \u2014 Fair Outcomes",
+        "status": "COVERED",
+        "evidence_ref": "FSC-2417 Consumer Duty verdict=PASS; fair outcomes obligation evidenced via regulatory scenario suite (10/10 scenarios passed)"
+      },
+      {
+        "rule": "Consumer Duty PS22/9 \u2014 Consumer Understanding",
+        "status": "COVERED",
+        "evidence_ref": "FSC-2417 Consumer Duty verdict=PASS; consumer understanding mapped and validated within regulatory scenario results"
+      },
+      {
+        "rule": "Consumer Duty PS22/9 \u2014 Vulnerability (FG21/1)",
+        "status": "COVERED",
+        "evidence_ref": "FSC-2417 Consumer Duty verdict=PASS; VulnerableCustomerIndicator__c treatment confirmed across scenario suite with no gaps reported"
+      },
+      {
+        "rule": "COBS 9.2 \u2014 Suitability Assessment (HIGH-FCA mandatory)",
+        "status": "MISSING",
+        "evidence_ref": "FSC-2417 Test Coverage=0.0% (verdict=FAIL); no Apex or automated test coverage exists for Suitability__c / SuitabilityAssessment logic \u2014 85% threshold required for HIGH-FCA components"
+      },
+      {
+        "rule": "MiFID II Art.25 \u2014 Appropriateness",
+        "status": "PARTIAL",
+        "evidence_ref": "FSC-2417 FCA Regulatory Scenarios verdict=PASS (10 scenarios, 0 gaps) provides scenario-level coverage, but 0.0% test coverage means Appropriateness__c logic is untested at unit/integration level"
+      },
+      {
+        "rule": "SYSC \u2014 Senior Managers & Certification Regime Governance",
+        "status": "PARTIAL",
+        "evidence_ref": "FSC-2417 UAT Coordination=BLOCKED; Compliance Officer sign-off cannot be issued, and governance chain is incomplete pending UAT resolution"
+      }
+    ],
+    "consumer_duty_covered": true,
+    "regulatory_sign_off_ready": false,
+    "evidence_verdict": "PARTIAL",
+    "evidence_gaps": [
+      "COBS 9.2 \u2014 Suitability Assessment: Test coverage is 0.0% against a mandatory 85% HIGH-FCA threshold; no unit or integration tests exist for Suitability__c / SuitabilityAssessment components",
+      "MiFID II Art.25 \u2014 Appropriateness: Scenario-level evidence present but zero code-level test coverage leaves Appropriateness__c logic unverified",
+      "SYSC \u2014 Governance: UAT Coordination is BLOCKED, preventing Compliance Officer sign-off and completion of the Senior Managers governance chain"
+    ],
+    "narrative": "FCA Evidence Pack compiled.",
+    "signals": {
+      "fca_classification_known": true,
+      "fca_scenarios_available": true,
+      "coverage_data_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 83,
+    "calibration_multiplier": 1.0,
+    "final_score": 83,
+    "signals": {
+      "fca_classification_known": true,
+      "fca_scenarios_available": true,
+      "coverage_data_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:39:57.230850"
+}

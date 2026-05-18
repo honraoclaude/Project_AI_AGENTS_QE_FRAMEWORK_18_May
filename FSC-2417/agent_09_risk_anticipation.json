@@ -1,0 +1,58 @@
+{
+  "agent_id": 9,
+  "agent_name": "Risk Anticipation",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 32340,
+  "what": "Risk register for FSC-2417: 0 risk(s) identified \u2014 CRITICAL=1, HIGH=6, overall=CRITICAL",
+  "why": "Risk Anticipation Agent synthesised findings from 8 upstream Refinement agents for a HIGH-FCA story. 11 recommended action(s) for the Product Owner.",
+  "data": {
+    "risk_register": [],
+    "risk_count": 0,
+    "critical_risk_count": 1,
+    "high_risk_count": 6,
+    "overall_risk_level": "CRITICAL",
+    "risk_summary": "FSC-2417 carries a CRITICAL regulatory risk: the COBS 9.2 acknowledgement bypass and error scenario is entirely unspecified, meaning a defect could allow a non-compliant advice recommendation to be recorded without audit evidence \u2014 a direct FCA compliance failure. Six HIGH risks compound this posture, spanning incomplete-dimension scoring (Consumer Understanding breach), stale-data alert gaps across all three dimensions, hardcoded algorithm weights without AC validation, missing FLS / permission model coverage, and undefined COBS_9_2_Acknowledgement__c schema. This story must not enter development until CO sign-off is obtained and the CRITICAL and HIGH risks are mitigated; the Compliance Officer should be notified immediately given the HIGH-FCA classification confirmed unanimously by the Agent 3 ensemble.",
+    "recommended_actions": [
+      "[CRITICAL \u2014 PO + CO ACTION BEFORE SPRINT START] Add acceptance criteria explicitly covering the COBS 9.2 acknowledgement failure path: (a) what happens if the acknowledgement fails to persist on FinancialAccount, and (b) what happens if SuitabilityScoreUpdated__e fires but the LWC does not receive it (stale score display). CO sign-off required on both scenarios before development begins (mitigates R-001).",
+      "[HIGH \u2014 PO ACTION] Add an AC covering behaviour when one or more of the three suitability dimensions (risk profile, investment objectives, financial circumstances) is null or partially completed \u2014 the dashboard must not display a calculated score and must clearly indicate to the Wealth Adviser that the assessment is incomplete (mitigates R-002).",
+      "[HIGH \u2014 PO ACTION] Extend the stale-data alert AC (currently AC3, financial circumstances only) to cover stale risk profile and stale investment objectives. All three dimensions must independently trigger a 'Requires Review' flag to prevent partial compliance being mistaken for full compliance (mitigates R-003).",
+      "[HIGH \u2014 PO + QE Lead ACTION] Add an AC validating the scoring algorithm: confirm that weighted aggregation (risk 40%, objectives 35%, circumstances 25%) always produces a result within 0\u2013100, handles null dimension inputs without silent failure, and that the formula is regression-tested against known inputs/outputs. QE Lead to add boundary value tests for 0.00, 50.00, and 100.00 (mitigates R-004).",
+      "[HIGH \u2014 PO ACTION] Raise a separate story or spike to define the COBS_9_2_Acknowledgement__c object schema, RecordType, and FCA-mandated retention policy, and confirm that the consolidated score and acknowledgement are included in the regulatory audit pack. Block FSC-2417 test data setup on completion of that spike (mitigates R-005 and R-012).",
+      "[HIGH \u2014 QE Lead ACTION] Define NFR acceptance criteria for SuitabilityScoreCalculator under bulk load: specify governor limit behaviour for 200+ simultaneous Suitability__c updates, confirm bulkification pattern (no per-record SOQL), and add a bulk Apex test using \u2265200 records. Confirm Platform Event quota impact and add monitoring/alerting for the 250,000 events/24hr org limit (mitigates R-006 and R-007).",
+      "[HIGH \u2014 PO + Tech Lead ACTION] Add FLS acceptance criteria specifying which Permission Sets grant read/write access to FinancialAccount.ConsolidatedSuitabilityScore__c and COBS_9_2_Acknowledgement__c. Deploy Permission Set changes as part of this story's definition of done; QE Lead to include FLS regression tests (mitigates R-008).",
+      "[MEDIUM \u2014 QE Lead ACTION] Add test coverage for the VulnerableCustomerIndicator__c context: if the flag is active on the client record, the suitability-dashboard LWC must surface enhanced-care context. Include this as a Consumer Duty regression scenario in the test suite (mitigates R-009).",
+      "[MEDIUM \u2014 QE Lead ACTION] Add a race-condition test for rapid successive Suitability__c updates to the same client \u2014 verify that the LWC always renders the latest consolidated score and not an out-of-order intermediate value. Document retry/fallback behaviour if Platform Event delivery exceeds 5 seconds (mitigates R-010).",
+      "[MEDIUM \u2014 QE Lead ACTION] Ensure test data factory supports: (a) RiskProfile__c inserted before Suitability__c, (b) ConsolidatedSuitabilityScore__c initialised to 0 on FinancialAccount, (c) no Suitability__c updates in @TestSetup, (d) per-test setup/teardown for Platform Event tests, (e) controlled LastAssessedDate__c values for stale-data tests, and (f) bulk insert mode for 200+ record scenarios (mitigates R-011).",
+      "[LOW \u2014 PO ACTION] Review INVEST score concerns (77/100) \u2014 tighten any vague AC wording identified by Agent 2 to improve story precision before sprint planning."
+    ],
+    "fca_classification_context": "HIGH",
+    "upstream_agents_available": 8,
+    "signals": {
+      "agent3_agreed": true,
+      "agent4_available": true,
+      "cd_risk_confirmed": "AT_RISK",
+      "remaining_ac_gaps": 4,
+      "empty_risk_register": 0,
+      "critical_risks_identified": 1
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 68,
+    "calibration_multiplier": 1.0,
+    "final_score": 68,
+    "signals": {
+      "agent3_agreed": true,
+      "agent4_available": true,
+      "cd_risk_confirmed": "AT_RISK",
+      "remaining_ac_gaps": 4,
+      "empty_risk_register": 0,
+      "critical_risks_identified": 1
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:37:00.291109"
+}

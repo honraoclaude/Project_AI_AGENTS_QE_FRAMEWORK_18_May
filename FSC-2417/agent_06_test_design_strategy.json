@@ -1,0 +1,73 @@
+{
+  "agent_id": 6,
+  "agent_name": "Test Design Strategy",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 46784,
+  "what": "Test strategy for FSC-2417: coverage=85%, apex_classes=3, crt_scenarios=5, risk_areas=7",
+  "why": "Test Design Strategy Agent applied PACT coverage standards for a HIGH-FCA story. Coverage target is 85% (85% PACT standard).",
+  "data": {
+    "coverage_target_pct": 85,
+    "apex_unit_test_classes": [
+      "SuitabilityScoreCalculator \u2014 consolidated score computation logic (0\u2013100 range), weighted aggregation of risk profile, investment objectives, and financial circumstances dimensions, and field write to FinancialAccount.ConsolidatedSuitabilityScore__c",
+      "SuitabilityScoreCalculator \u2014 Suitability__c trigger handler: before/after update entry points, bulkification loop safety, Platform Event (SuitabilityScoreUpdated__e) publish logic",
+      "SuitabilityScoreCalculator \u2014 error-path handling: null/missing dimension scores, division-by-zero guard, invalid score range rejection, failed Platform Event publish recovery"
+    ],
+    "integration_test_scope": [
+      "Suitability__c update \u2192 SuitabilityScoreCalculator invocation \u2192 ConsolidatedSuitabilityScore__c write on parent FinancialAccount: verify lookup integrity and field propagation end-to-end",
+      "Suitability__c \u2192 RiskProfile__c lookup integrity: confirm risk profile dimension is correctly resolved and incorporated into the consolidated score when RiskProfile__c record is present, absent, or stale",
+      "SuitabilityScoreUpdated__e Platform Event publish \u2192 LWC suitability-dashboard subscription: verify real-time score refresh fires correctly after Suitability__c record update",
+      "FinancialAccount.ConsolidatedSuitabilityScore__c field-level validation: confirm Number(3,2) field rejects out-of-range values (< 0, > 100) and accepts boundary values (0.00, 100.00) across bulk record sets",
+      "Household Account roll-up: verify that ConsolidatedSuitabilityScore__c updates on individual FinancialAccount records do not corrupt or unintentionally aggregate to Household-level AUM or related roll-up fields"
+    ],
+    "ui_test_components": [
+      "LWC suitability-dashboard \u2014 consolidated score rendering: verify score (0\u2013100) displays correctly for happy-path client with all three dimensions populated",
+      "LWC suitability-dashboard \u2014 real-time refresh: verify dashboard reflects updated score without full page reload after Suitability__c record change fires SuitabilityScoreUpdated__e",
+      "LWC suitability-dashboard \u2014 partial/missing data states: verify graceful degradation UI when one or more dimension scores (risk profile, objectives, financial circumstances) are absent",
+      "LWC suitability-dashboard \u2014 FLS compliance: verify ConsolidatedSuitabilityScore__c field is not rendered for profiles/permission sets without Read access to FinancialAccount custom field",
+      "LWC suitability-dashboard \u2014 Vulnerable Customer indicator: verify enhanced-care messaging or visual flag is displayed when VulnerableCustomerIndicator__c is active on the client record"
+    ],
+    "crt_recommended_count": 5,
+    "test_tools": [
+      "ApexUnit",
+      "CRT",
+      "Jest",
+      "LWCTest"
+    ],
+    "risk_areas": [
+      "Bulkification risk in SuitabilityScoreCalculator Apex trigger on Suitability__c \u2014 batch adviser workflows or data migrations may update many Suitability__c records simultaneously, causing SOQL/DML governor limit breaches if the score recalculation issues per-record queries to FinancialAccount",
+      "Platform Event governor limit risk \u2014 SuitabilityScoreUpdated__e publishes are subject to the 250,000 events/24hr org limit; bulk Suitability__c updates could exhaust this quota and silently suppress dashboard refresh for downstream users",
+      "FLS exposure risk on FinancialAccount.ConsolidatedSuitabilityScore__c \u2014 new custom Number field may be inadvertently readable by non-adviser profiles (e.g. Operations/Admin) or invisible to Wealth Adviser profiles if Permission Sets are not correctly updated post-deployment",
+      "Consumer Duty compliance risk \u2014 if VulnerableCustomerIndicator__c is active on the client record, the suitability-dashboard LWC must surface enhanced-care context; failure to do so constitutes a Consumer Duty (PS22/9) breach for the vulnerable customer journey",
+      "Score boundary and precision risk in SuitabilityScoreCalculator \u2014 weighted aggregation logic may produce values outside the 0\u2013100 range or lose decimal precision due to floating-point arithmetic on the Number(3,2) field; boundary values (0.00, 50.00, 100.00) and rounding behaviour must be explicitly tested",
+      "COBS 9.2 regulatory integrity risk \u2014 if any one of the three dimension scores (risk profile, investment objectives, financial circumstances) is null or stale, the consolidated score may be computed on incomplete data and presented as valid to the adviser, leading to a non-compliant recommendation",
+      "Real-time refresh race condition \u2014 if multiple Suitability__c records for the same client are updated in rapid succession, out-of-order Platform Event delivery may cause the LWC dashboard to display a stale or intermediate score rather than the latest consolidated value"
+    ],
+    "test_strategy_summary": "This story is classified HIGH-FCA (COBS 9.2 + Consumer Duty PS22/9) and requires an 85% Apex line coverage target across SuitabilityScoreCalculator, with dedicated unit tests covering the score computation algorithm, bulkification safety, Platform Event publishing, and all error paths including null dimension scores and out-of-range values. Integration tests must validate the full Suitability__c \u2192 SuitabilityScoreCalculator \u2192 FinancialAccount.ConsolidatedSuitabilityScore__c chain, RiskProfile__c lookup resolution, and Platform Event \u2192 LWC refresh handoff. Five CRT scenarios are recommended covering the happy path, vulnerable customer enhanced-care rendering, FLS access boundaries, partial data degradation, and bulk update governor limit behaviour \u2014 Compliance Officer sign-off is required before promotion to UAT.",
+    "fca_classification_context": "HIGH",
+    "signals": {
+      "fca_known_elevated": "HIGH",
+      "fsc_objects_rich": 3,
+      "invest_fail": 77,
+      "crt_scenarios_identified": 5,
+      "risk_areas_identified": 7
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 83,
+    "calibration_multiplier": 1.0,
+    "final_score": 83,
+    "signals": {
+      "fca_known_elevated": "HIGH",
+      "fsc_objects_rich": 3,
+      "invest_fail": 77,
+      "crt_scenarios_identified": 5,
+      "risk_areas_identified": 7
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:36:11.868837"
+}

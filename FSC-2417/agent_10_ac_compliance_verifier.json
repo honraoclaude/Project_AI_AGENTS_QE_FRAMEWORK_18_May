@@ -1,0 +1,41 @@
+{
+  "agent_id": 10,
+  "agent_name": "AC Compliance Verifier",
+  "phase": "Development",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 3736,
+  "what": "AC compliance for FSC-2417: 4 ACs current (refinement=12, delta=-8) \u2014 verdict=FAIL",
+  "why": "Story FSC-2417 has lost 8 acceptance criteria since refinement (12 \u2192 4 ACs), a significant drift that creates regulatory risk on a HIGH-FCA story touching COBS 9.2 suitability logic. The developer must immediately recover the missing 8 ACs from the refinement baseline\u2014particularly those covering risk profile validation, suitability assessment integration, and audit trail requirements\u2014before proceeding to code review. Recommend Refinement gate review with Compliance Officer to ensure no regulatory coverage gaps remain before Development resumes.",
+  "data": {
+    "ac_count_current": 4,
+    "ac_count_at_refinement": 12,
+    "ac_delta": -8,
+    "compliance_verdict": "FAIL",
+    "missing_coverage_types": [],
+    "compliance_risk": "high",
+    "narrative": "Story FSC-2417 has lost 8 acceptance criteria since refinement (12 \u2192 4 ACs), a significant drift that creates regulatory risk on a HIGH-FCA story touching COBS 9.2 suitability logic. The developer must immediately recover the missing 8 ACs from the refinement baseline\u2014particularly those covering risk profile validation, suitability assessment integration, and audit trail requirements\u2014before proceeding to code review. Recommend Refinement gate review with Compliance Officer to ensure no regulatory coverage gaps remain before Development resumes.",
+    "fca_classification": "HIGH",
+    "signals": {
+      "refinement_baseline_available": true,
+      "acs_present_in_jira": 4,
+      "acs_removed_since_refinement": 8,
+      "all_coverage_types_present": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 78,
+    "calibration_multiplier": 1.0,
+    "final_score": 78,
+    "signals": {
+      "refinement_baseline_available": true,
+      "acs_present_in_jira": 4,
+      "acs_removed_since_refinement": 8,
+      "all_coverage_types_present": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:03.851390"
+}

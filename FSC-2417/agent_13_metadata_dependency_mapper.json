@@ -1,0 +1,65 @@
+{
+  "agent_id": 13,
+  "agent_name": "Metadata Dependency Mapper",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 3736,
+  "what": "Metadata dependency map for FSC-2417: 7 file(s) changed, detected=['financialaccount', 'suitability__c'], depth=2",
+  "why": "FSC-2417 development detected changes to FinancialAccount and Suitability__c objects with an implied parent dependency on RiskProfile__c, forming a two-level dependency chain. The refinement prediction included FinancialAccount, Goal__c, Individual, RiskProfile__c, and Suitability__c; the actual development scope covers FinancialAccount and Suitability__c with RiskProfile__c as a parent, representing a tighter focus on suitability assessment logic rather than goals or individual records. The scope is consistent with the story intent, though Goal__c and Individual were predicted but not modified\u2014this suggests the story narrowed focus post-refinement, which is acceptable if justified by acceptance criteria.",
+  "data": {
+    "changed_files_count": 7,
+    "detected_objects": [
+      "financialaccount",
+      "suitability__c"
+    ],
+    "implied_objects": [
+      "riskprofile__c"
+    ],
+    "dependency_graph": {
+      "suitability__c": [
+        "riskprofile__c",
+        "financialaccount",
+        "individual"
+      ],
+      "financialaccount": [
+        "household",
+        "individual"
+      ],
+      "riskprofile__c": [
+        "financialaccount",
+        "individual"
+      ],
+      "individual": [],
+      "household": []
+    },
+    "dependency_depth": 2,
+    "scope_delta_objects": [],
+    "scope_matches_refinement": true,
+    "dependency_complexity": "medium",
+    "narrative": "FSC-2417 development detected changes to FinancialAccount and Suitability__c objects with an implied parent dependency on RiskProfile__c, forming a two-level dependency chain. The refinement prediction included FinancialAccount, Goal__c, Individual, RiskProfile__c, and Suitability__c; the actual development scope covers FinancialAccount and Suitability__c with RiskProfile__c as a parent, representing a tighter focus on suitability assessment logic rather than goals or individual records. The scope is consistent with the story intent, though Goal__c and Individual were predicted but not modified\u2014this suggests the story narrowed focus post-refinement, which is acceptable if justified by acceptance criteria.",
+    "signals": {
+      "changed_files_present": 7,
+      "detected_objects_rich": 2,
+      "refinement_baseline_available": true,
+      "scope_matches_refinement": true,
+      "deep_dependency_chain": 2
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 92,
+    "calibration_multiplier": 1.0,
+    "final_score": 92,
+    "signals": {
+      "changed_files_present": 7,
+      "detected_objects_rich": 2,
+      "refinement_baseline_available": true,
+      "scope_matches_refinement": true,
+      "deep_dependency_chain": 2
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:04.044115"
+}

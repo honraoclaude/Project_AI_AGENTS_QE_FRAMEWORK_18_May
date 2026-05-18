@@ -1,0 +1,10 @@
+{
+  "agent_id": 14,
+  "agent_name": "Code Quality",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "error",
+  "error": "'rule_name'",
+  "error_type": "KeyError",
+  "elapsed_ms": 4060
+}

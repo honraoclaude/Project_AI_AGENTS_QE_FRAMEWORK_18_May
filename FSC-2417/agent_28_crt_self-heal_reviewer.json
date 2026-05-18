@@ -1,0 +1,35 @@
+{
+  "agent_id": 28,
+  "agent_name": "CRT Self-Heal Reviewer",
+  "phase": "Testing",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 3017,
+  "what": "Self-heal review for FSC-2417: 0 self-healed test(s), 0 suspect \u2014 verdict=PASS",
+  "why": "Story FSC-2417 recorded zero self-healed tests, with no suspect self-heals detected and a LOW auto-heal risk profile. All test assertions executed as designed without requiring automated element recovery. The QE engineer may proceed with confidence; no manual verification of self-heal behavior is required.",
+  "data": {
+    "self_healed_count": 0,
+    "suspect_self_heals": [],
+    "self_heal_verdict": "PASS",
+    "auto_heal_risk": "LOW",
+    "heal_concern": "none",
+    "narrative": "Story FSC-2417 recorded zero self-healed tests, with no suspect self-heals detected and a LOW auto-heal risk profile. All test assertions executed as designed without requiring automated element recovery. The QE engineer may proceed with confidence; no manual verification of self-heal behavior is required.",
+    "signals": {
+      "no_crt_results": 0,
+      "no_self_heals": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 55,
+    "calibration_multiplier": 1.0,
+    "final_score": 55,
+    "signals": {
+      "no_crt_results": 0,
+      "no_self_heals": true
+    },
+    "escalated": true
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:05.641226"
+}

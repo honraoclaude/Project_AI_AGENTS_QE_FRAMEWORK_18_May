@@ -1,0 +1,46 @@
+{
+  "agent_id": 15,
+  "agent_name": "Apex Security Scanner",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 12479,
+  "what": "Security assessment for FSC-2417: risk_level=HIGH, verdict=REVIEW_REQUIRED, crud_fls_required=True",
+  "why": "This HIGH-FCA story modifies FinancialAccount and Suitability__c (a COBS 9.2-mandated risk assessment object), requiring comprehensive CRUD and FLS enforcement review on Suitability__c to ensure only authorized advisers and compliance staff can read and modify client suitability records. The sharing model must be reviewed across all modified Apex classes to confirm that record-level access is correctly enforced and no unintended escalation of privileges occurs. Before promotion, the developer must obtain Compliance Officer sign-off and provide evidence of CRUD/FLS controls and sharing model validation in the pull request.",
+  "data": {
+    "security_risk_level": "HIGH",
+    "security_verdict": "REVIEW_REQUIRED",
+    "security_flags": [
+      "CRUD/FLS enforcement required on: suitability__c",
+      "HIGH-FCA story \u2014 sharing model must be reviewed for all changed Apex classes"
+    ],
+    "crud_fls_review_required": true,
+    "sharing_model_review_required": true,
+    "fca_classification": "HIGH",
+    "detected_objects_assessed": [
+      "financialaccount",
+      "suitability__c"
+    ],
+    "security_concern": "high",
+    "narrative": "This HIGH-FCA story modifies FinancialAccount and Suitability__c (a COBS 9.2-mandated risk assessment object), requiring comprehensive CRUD and FLS enforcement review on Suitability__c to ensure only authorized advisers and compliance staff can read and modify client suitability records. The sharing model must be reviewed across all modified Apex classes to confirm that record-level access is correctly enforced and no unintended escalation of privileges occurs. Before promotion, the developer must obtain Compliance Officer sign-off and provide evidence of CRUD/FLS controls and sharing model validation in the pull request.",
+    "signals": {
+      "fca_class_available": true,
+      "metadata_scope_available": true,
+      "fsc_objects_in_scope": 2
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 86,
+    "calibration_multiplier": 1.0,
+    "final_score": 86,
+    "signals": {
+      "fca_class_available": true,
+      "metadata_scope_available": true,
+      "fsc_objects_in_scope": 2
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:08.176979"
+}

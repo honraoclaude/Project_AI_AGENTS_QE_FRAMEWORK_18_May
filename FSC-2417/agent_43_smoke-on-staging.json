@@ -1,0 +1,38 @@
+{
+  "agent_id": 43,
+  "agent_name": "Smoke-on-Staging",
+  "phase": "Release",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2039,
+  "what": "Smoke tests for FSC-2417: 5 run, 0 failed, suite=SMOKE \u2014 verdict=PASS",
+  "why": "The SMOKE test suite ran 5 tests against FSC-2417 on staging with 0 failures, confirming all critical paths are functional. The story is cleared for production deployment.",
+  "data": {
+    "smoke_tests_passed": true,
+    "smoke_test_count": 5,
+    "smoke_failed": 0,
+    "smoke_suite": "SMOKE",
+    "smoke_verdict": "PASS",
+    "smoke_concern": "none",
+    "narrative": "The SMOKE test suite ran 5 tests against FSC-2417 on staging with 0 failures, confirming all critical paths are functional. The story is cleared for production deployment.",
+    "signals": {
+      "dry_run_data_available": true,
+      "regression_risk_data": true,
+      "smoke_tests_passed": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 78,
+    "calibration_multiplier": 1.0,
+    "final_score": 78,
+    "signals": {
+      "dry_run_data_available": true,
+      "regression_risk_data": true,
+      "smoke_tests_passed": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:42.577436"
+}

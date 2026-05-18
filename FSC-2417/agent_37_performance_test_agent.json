@@ -1,0 +1,35 @@
+{
+  "agent_id": 37,
+  "agent_name": "Performance Test Agent",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 3017,
+  "what": "Performance test for FSC-2417: required=False, response_ok=True, governor_ok=True \u2014 verdict=SKIPPED",
+  "why": "FSC-2417 was assessed as MEDIUM performance risk with MEDIUM governor limit exposure; however, formal performance testing was not required based on the risk profile and component classification. Response times and governor limit headroom remain within acceptable parameters, and no performance concerns were identified during static analysis. The story may proceed to development without additional performance test gating.",
+  "data": {
+    "perf_test_required": false,
+    "perf_test_verdict": "SKIPPED",
+    "response_time_ok": true,
+    "governor_limits_ok": true,
+    "performance_concern": "none",
+    "narrative": "FSC-2417 was assessed as MEDIUM performance risk with MEDIUM governor limit exposure; however, formal performance testing was not required based on the risk profile and component classification. Response times and governor limit headroom remain within acceptable parameters, and no performance concerns were identified during static analysis. The story may proceed to development without additional performance test gating.",
+    "signals": {
+      "performance_risk_signal_available": true,
+      "performance_test_not_required": 0
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 73,
+    "calibration_multiplier": 1.0,
+    "final_score": 73,
+    "signals": {
+      "performance_risk_signal_available": true,
+      "performance_test_not_required": 0
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:05.744896"
+}

@@ -1,0 +1,42 @@
+{
+  "agent_id": 20,
+  "agent_name": "Performance Risk Estimator",
+  "phase": "Development",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 30069,
+  "what": "Performance risk for FSC-2417: risk=MEDIUM, soql_loop_risk=False, governor_exposure=MEDIUM \u2014 verdict=WARN",
+  "why": "FSC-2417 introduces a HIGH bulk/async risk and targets FinancialAccount\u2014a high-volume object with dependency depth 2\u2014creating potential governor limit exposure during mass updates or record-triggered flows. The story contains 1 PMD critical violation and must implement bulkification, asynchronous processing, and pagination patterns to prevent SOQL batch limits and governor exhaustion. Developer must add batch chunking, validate DML statements within bulk operations, and monitor heap usage in the deployment validation phase.",
+  "data": {
+    "performance_risk_level": "MEDIUM",
+    "performance_risk_factors": [
+      "High-volume objects in scope: ['financialaccount']",
+      "Moderate dependency chain (depth=2)",
+      "Agent 16 assessed HIGH bulk/async risk"
+    ],
+    "soql_loop_risk": false,
+    "governor_limit_exposure": "MEDIUM",
+    "performance_verdict": "WARN",
+    "performance_concern": "multiple",
+    "narrative": "FSC-2417 introduces a HIGH bulk/async risk and targets FinancialAccount\u2014a high-volume object with dependency depth 2\u2014creating potential governor limit exposure during mass updates or record-triggered flows. The story contains 1 PMD critical violation and must implement bulkification, asynchronous processing, and pagination patterns to prevent SOQL batch limits and governor exhaustion. Developer must add batch chunking, validate DML statements within bulk operations, and monitor heap usage in the deployment validation phase.",
+    "signals": {
+      "code_time_metadata_available": true,
+      "fca_classification_available": true,
+      "bulk_risk_context_available": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 80,
+    "calibration_multiplier": 1.0,
+    "final_score": 80,
+    "signals": {
+      "code_time_metadata_available": true,
+      "fca_classification_available": true,
+      "bulk_risk_context_available": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:37:44.637041"
+}

@@ -1,0 +1,69 @@
+{
+  "agent_id": 4,
+  "agent_name": "Consumer Duty Mapper",
+  "phase": "Refinement",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 29785,
+  "what": "Consumer Duty mapping for FSC-2417: verdict=AT_RISK, outcomes=['products_and_services', 'consumer_understanding'], vulnerable_customer=False",
+  "why": "Consumer Duty Mapper applied FCA PS22/9 and FG21/1 to story classified as HIGH by Agent 3. Found 5 obligation(s) and 6 risk(s).",
+  "data": {
+    "cd_outcomes_affected": [
+      "products_and_services",
+      "consumer_understanding"
+    ],
+    "vulnerable_customer_impact": false,
+    "vulnerable_customer_rationale": "The story does not touch VulnerableCustomerIndicator__c and no flow changes are described that specifically handle vulnerable customer pathways; the dashboard is an adviser-facing tool with no explicit vulnerable customer routing logic.",
+    "cd_obligations": [
+      "PS22/9 Outcome 1 \u2014 Products and Services: the consolidated suitability score must ensure investment recommendations are fit for purpose and appropriate for the client's target market classification (Retail Client under COBS 3.4)",
+      "PS22/9 Outcome 3 \u2014 Consumer Understanding: the suitability dashboard and COBS 9.2 compliance warning (AC4) must present assessment outcomes and risk warnings clearly and in a non-misleading manner to the advising Wealth Manager, supporting informed advice delivery to the end client",
+      "COBS 9.2 \u2014 Suitability Assessment: the SuitabilityScoreCalculator must correctly incorporate risk profile, investment objectives, and financial circumstances, and the mandatory COBS 9.2 warning gate (AC4) must be enforced before advice is recorded",
+      "COBS 3.4 \u2014 Client Classification: the mandatory warning in AC4 must be correctly scoped to Retail Client records only and must not inadvertently suppress the warning for eligible counterparties or professional clients",
+      "SYSC \u2014 Governance and Oversight: the SuitabilityScoreUpdated__e platform event and audit trail of COBS 9.2 acknowledgements (AC4) must be available to support Senior Manager oversight and compliance review"
+    ],
+    "cd_risks": [
+      "AC4 defines a mandatory COBS 9.2 warning acknowledgement but no AC covers the bypass or error scenario \u2014 e.g. what happens if the acknowledgement fails to persist against FinancialAccount, or if the Platform Event fires but the LWC does not receive it, leaving a stale score visible to the adviser",
+      "No acceptance criterion covers the behaviour when one or more of the three assessment dimensions is missing or partially completed \u2014 an incomplete score could give a false sense of suitability compliance and mislead the adviser (Consumer Understanding risk)",
+      "The stale-data alert in AC3 flags financial circumstances older than 12 months but no AC covers stale risk profile or investment objectives \u2014 advisers may be misled into treating a partial 'Requires Review' flag as full compliance",
+      "The scoring algorithm weights (risk 40%, objectives 35%, circumstances 25%) are hardcoded in the description but not validated in any AC \u2014 a calculation defect could silently produce a non-compliant suitability score stored on FinancialAccount without detection",
+      "No AC addresses bulk or concurrent Suitability__c updates (e.g. a batch review), creating a risk that the Apex trigger produces incorrect consolidated scores at scale, potentially affecting multiple clients' advice suitability simultaneously",
+      "There is no AC confirming that the consolidated score and COBS 9.2 acknowledgement are included in the existing regulatory audit pack \u2014 a gap that could affect the firm's ability to demonstrate Consumer Duty compliance to the FCA"
+    ],
+    "cd_evidence_required": [
+      "Screenshot of the suitability-dashboard LWC displaying the consolidated score, dimension breakdown, and assessment dates for a fully assessed Retail Client (AC1 evidence)",
+      "Screenshot or test log showing the COBS 9.2 mandatory warning gate (AC4) firing correctly for a Retail Client with a sub-50 score, and the acknowledgement persisting on FinancialAccount",
+      "Apex unit test results for SuitabilityScoreCalculator showing \u226585% code coverage (HIGH-FCA threshold), including tests for all three weighted dimensions, boundary scores (0, 50, 100), and missing-dimension scenarios",
+      "Platform Event (SuitabilityScoreUpdated__e) test log demonstrating real-time dashboard refresh within the 5-second SLA (AC2)",
+      "Test results confirming the 'Requires Review' flag is correctly displayed when financial circumstances are stale (>12 months) and that the numeric score is suppressed (AC3)",
+      "Test results confirming the COBS 9.2 warning is scoped exclusively to COBS 3.4 Retail Client records and is not triggered for Professional or Eligible Counterparty classifications (AC4)",
+      "Impact assessment on PS22/9 Outcome 1 (Products and Services) confirming that the consolidated score does not create a new product-access gate or alter existing suitability approval workflows",
+      "Compliance Officer (CO) sign-off documentation confirming review of the scoring algorithm weights and the COBS 9.2 warning gate design prior to release",
+      "Audit trail extract showing ConsolidatedSuitabilityScore__c history and COBS 9.2 acknowledgement records on FinancialAccount for a sample of test clients, for inclusion in the FCA audit pack"
+    ],
+    "cd_verdict": "AT_RISK",
+    "cd_rationale": "FSC-2417 is a HIGH-FCA story that directly supports PS22/9 Outcome 1 (Products and Services \u2014 ensuring recommendations are fit for purpose) and Outcome 3 (Consumer Understanding \u2014 ensuring the advising Wealth Manager receives clear, accurate, and current suitability information before recording advice). The story's ACs address the primary happy paths well, including the COBS 9.2 mandatory warning gate (AC4) and stale-data alerting (AC3), but several material gaps prevent a COMPLIANT verdict. Specifically, there is no AC covering the failure mode where the COBS 9.2 acknowledgement fails to persist (a direct PS22/9 Outcome 3 and COBS 9.2 gap), no AC handling missing or partial assessment dimensions (which could silently produce a misleading score), and the stale-data logic covers only financial circumstances rather than all three dimensions \u2014 meaning advisers could act on a partially stale score without a review prompt. These gaps require explicit AC coverage and CO review before the story can be considered compliant.",
+    "fca_classification_from_agent3": "HIGH",
+    "agent3_available": true,
+    "signals": {
+      "fca_high": "HIGH",
+      "agent3_agreed": true,
+      "fca_triggers_present": 10,
+      "obligations_present": 5
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 85,
+    "calibration_multiplier": 1.0,
+    "final_score": 85,
+    "signals": {
+      "fca_high": "HIGH",
+      "agent3_agreed": true,
+      "fca_triggers_present": 10,
+      "obligations_present": 5
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:35:41.139850"
+}

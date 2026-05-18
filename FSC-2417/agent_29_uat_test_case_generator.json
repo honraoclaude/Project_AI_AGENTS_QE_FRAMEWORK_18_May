@@ -1,0 +1,39 @@
+{
+  "agent_id": 29,
+  "agent_name": "UAT Test Case Generator",
+  "phase": "Testing",
+  "classification": "True AI",
+  "status": "ok",
+  "elapsed_ms": 39579,
+  "what": "UAT test cases for FSC-2417: 0 test(s) generated, CO sign-off required=False \u2014 verdict=INCOMPLETE",
+  "why": "Generated 0 UAT test case(s) for 4 AC(s) on a HIGH-FCA story. 0 regulatory assertion(s) captured.",
+  "data": {
+    "uat_test_cases": [],
+    "uat_test_count": 0,
+    "co_sign_off_required": false,
+    "uat_verdict": "INCOMPLETE",
+    "regulatory_assertions": [],
+    "ac_count": 4,
+    "signals": {
+      "acs_available": 4,
+      "fca_classification_available": true,
+      "no_uat_tests": 0,
+      "regulated_story_co_not_flagged": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 65,
+    "calibration_multiplier": 1.0,
+    "final_score": 65,
+    "signals": {
+      "acs_available": 4,
+      "fca_classification_available": true,
+      "no_uat_tests": 0,
+      "regulated_story_co_not_flagged": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-sonnet-4-6",
+  "completed_at": "2026-05-18 20:38:57.038945"
+}

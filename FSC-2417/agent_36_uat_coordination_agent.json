@@ -1,0 +1,39 @@
+{
+  "agent_id": 36,
+  "agent_name": "UAT Coordination Agent",
+  "phase": "Testing",
+  "classification": "Augmented Script",
+  "status": "ok",
+  "elapsed_ms": 2650,
+  "what": "UAT coordination for FSC-2417: sign_off_required=True, received=False \u2014 verdict=BLOCKED",
+  "why": "FSC-2417 is a HIGH-FCA story with zero UAT tests defined and 0.0% code coverage, making it blocked for release. A Compliance Officer (CO) sign-off request must be sent immediately; however, sign-off cannot be granted until comprehensive UAT test coverage is established and all tests pass. The story must remain in UAT until test suite completion and CO approval are both documented.",
+  "data": {
+    "uat_sign_off_required": true,
+    "uat_sign_off_received": false,
+    "uat_coordination_verdict": "BLOCKED",
+    "sign_off_request_sent": false,
+    "coordination_concern": "no_uat_tests",
+    "narrative": "FSC-2417 is a HIGH-FCA story with zero UAT tests defined and 0.0% code coverage, making it blocked for release. A Compliance Officer (CO) sign-off request must be sent immediately; however, sign-off cannot be granted until comprehensive UAT test coverage is established and all tests pass. The story must remain in UAT until test suite completion and CO approval are both documented.",
+    "signals": {
+      "fca_classification_known": true,
+      "uat_test_results_available": true,
+      "coverage_data_available": true,
+      "sign_off_blocked_by_defects": true
+    }
+  },
+  "confidence": {
+    "tier": "B",
+    "raw_score": 70,
+    "calibration_multiplier": 1.0,
+    "final_score": 70,
+    "signals": {
+      "fca_classification_known": true,
+      "uat_test_results_available": true,
+      "coverage_data_available": true,
+      "sign_off_blocked_by_defects": true
+    },
+    "escalated": false
+  },
+  "model_used": "claude-haiku-4-5-20251001",
+  "completed_at": "2026-05-18 20:39:18.140857"
+}

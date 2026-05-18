@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: qe_framework
+      POSTGRES_USER: qe_admin
+      POSTGRES_PASSWORD: localdev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_roles.sql:/docker-entrypoint-initdb.d/init_roles.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qe_admin -d qe_framework"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  fleet-commander:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.fleet_commander.main
+    environment:
+      - DATABASE_URL=postgresql+psycopg://qe_agent_writer:writer_localdev@postgres:5432/qe_framework
+      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  qds-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.mcp.qds_mcp.server
+    environment:
+      - DATABASE_URL=postgresql+psycopg://qe_agent_writer:writer_localdev@postgres:5432/qe_framework
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  jira-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m src.mcp.jira_mcp.server
+    env_file: .env
+    restart: unless-stopped
+
+  signoff-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn src.signoff.app:app --host 0.0.0.0 --port 8000
+    environment:
+      - DATABASE_URL=postgresql+psycopg://qe_agent_writer:writer_localdev@postgres:5432/qe_framework
+      - REDIS_URL=redis://redis:6379/0
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

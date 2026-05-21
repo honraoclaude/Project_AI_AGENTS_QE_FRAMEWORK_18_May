@@ -108,6 +108,7 @@
 
   /* ── Three-column panels ────────────────────────────────────── */
   .cols-3 { display: flex; gap: 8px; margin: 8px 0; }
+  .cols-2 { display: flex; gap: 8px; margin: 8px 0; }
   .panel {
     flex: 1;
     border: 1px solid #d0dae4;
@@ -140,6 +141,23 @@
     left: 0;
     color: #00b4d8;
     font-weight: 700;
+  }
+
+  /* ── Game theory badge strip ────────────────────────────────── */
+  .gt-strip {
+    display: flex;
+    gap: 6px;
+    margin: 8px 0 4px;
+    flex-wrap: wrap;
+  }
+  .gt-badge {
+    background: #0d1b2a;
+    color: #00b4d8;
+    border: 1px solid #00b4d8;
+    border-radius: 3px;
+    font-size: 8.5pt;
+    font-weight: 700;
+    padding: 3px 9px;
   }
 
   /* ── Benefits table ─────────────────────────────────────────── */
@@ -227,17 +245,19 @@
   <div class="section-title">What We Built</div>
   <div class="intro">
     The FSC Agentic QE Framework is a purpose-built AI pipeline that automatically applies
-    53 specialised quality engineering agents to every Jira user story — from initial refinement
-    through production release. Designed specifically for FCA-regulated Salesforce FSC Wealth
-    Management delivery, it produces structured BDD acceptance criteria, FCA compliance checks,
-    test design strategy, risk registers, and audit evidence — in under 10 minutes per story,
-    with no manual effort per sprint.
+    54 specialised quality engineering agents to every Jira user story — from initial refinement
+    through production release. Designed for FCA-regulated Salesforce FSC Wealth Management delivery,
+    it produces structured BDD acceptance criteria, FCA compliance checks, test design strategy,
+    risk registers, and audit evidence in under 10 minutes per story. The framework is now enhanced
+    with four <strong>game theory principles</strong> — adversarial AC challenge, confidence-weighted
+    synthesis, Shapley attribution, and FCA-adaptive gate thresholds — making quality incentives
+    mathematically rigorous across the delivery pipeline.
   </div>
 
   <!-- METRICS -->
   <div class="metrics">
     <div class="metric-card">
-      <span class="num">53</span>
+      <span class="num">54</span>
       <span class="lbl">AI Agents</span>
     </div>
     <div class="metric-card">
@@ -249,11 +269,11 @@
       <span class="lbl">Quality Gates</span>
     </div>
     <div class="metric-card">
-      <span class="num">53/53</span>
+      <span class="num">54/54</span>
       <span class="lbl">Agents Validated</span>
     </div>
     <div class="metric-card">
-      <span class="num">1,065</span>
+      <span class="num">1,078</span>
       <span class="lbl">Automated Tests</span>
     </div>
     <div class="metric-card">
@@ -277,10 +297,10 @@
     <div class="panel">
       <h4>The Solution — End-to-End Coverage</h4>
       <ul>
-        <li><strong>Refinement:</strong> FCA classification, BDD acceptance criteria, Consumer Duty mapping, and risk register — before code starts</li>
-        <li><strong>Development:</strong> AC compliance check, Apex coverage analysis, security scan, BDD Gherkin test files, and test data architecture generated automatically</li>
+        <li><strong>Refinement:</strong> FCA classification, BDD acceptance criteria, adversarial AC challenge, Consumer Duty mapping, and risk register — before code starts</li>
+        <li><strong>Development:</strong> AC compliance check, Apex coverage analysis (FCA-adaptive threshold), security scan, BDD Gherkin files, and test data architecture</li>
         <li><strong>Testing:</strong> CRT scenarios, UAT test cases, FCA regulatory tests, regression risk, defect triage, and flaky test detection — all structured and traceable</li>
-        <li><strong>Release:</strong> Automated Go/No-Go gate, FCA Evidence Pack, change set integrity, dry-run validation, and production sign-off tracking</li>
+        <li><strong>Release:</strong> Automated Go/No-Go gate, FCA Evidence Pack with Shapley attribution, change set integrity, dry-run, and production sign-off tracking</li>
       </ul>
     </div>
     <div class="panel">
@@ -291,6 +311,34 @@
         <li><strong>FG21/1 §4.3 (Testing):</strong> Vulnerable customer pathways verified through dedicated FCA scenario agent</li>
         <li><strong>SYSC Audit Trail (Release):</strong> Immutable ledger across all phases; FCA Evidence Pack auto-assembled per story before release</li>
         <li><strong>Go/No-Go Gate (Release):</strong> Release blocked if FCA evidence pack is incomplete or unacknowledged</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- GAME THEORY ENHANCEMENTS -->
+  <div class="section-title">Game Theory Enhancements (New)</div>
+  <div class="gt-strip">
+    <span class="gt-badge">Minimax</span>
+    <span class="gt-badge">Cooperative Weighting</span>
+    <span class="gt-badge">Shapley Values</span>
+    <span class="gt-badge">Mechanism Design</span>
+  </div>
+  <div class="cols-2">
+    <div class="panel">
+      <h4>AC Challenger — Adversarial Testing (Agent 05B)</h4>
+      <ul>
+        <li>Plays the role of a hostile FCA inspector against every BDD clause generated by Agent 05</li>
+        <li>Identifies five weakness types: ambiguous Given steps, non-observable Then outcomes, missing error paths, weak regulatory citations, untestable clauses</li>
+        <li>ACs that survive adversarial challenge are demonstrably stronger before development begins</li>
+        <li>Agent 09 (Risk Anticipation) adjusts confidence based on findings: 0 critical weaknesses = +8 confidence; 3+ = −10</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>Confidence Weighting, Shapley &amp; Adaptive Gates</h4>
+      <ul>
+        <li><strong>Confidence-weighted synthesis:</strong> Agent 09 weights upstream evidence by quality — a conf=85 FCA classification counts more than a conf=45 one</li>
+        <li><strong>Shapley attribution:</strong> Fair marginal credit assigned to each upstream agent in the Risk Register and FCA Evidence Pack — mathematically transparent for FCA audit</li>
+        <li><strong>Adaptive gates:</strong> HIGH-FCA stories face stricter thresholds (INVEST 85+, coverage 90%+); LOW-FCA stories fast-track at lower bars — correct incentives across the pipeline</li>
       </ul>
     </div>
   </div>
@@ -308,7 +356,13 @@
       <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
       <td class="benefit-label">Acceptance Criteria Quality</td>
       <td>Varies by analyst — vague, untestable, missing error and regulatory scenarios</td>
-      <td><span class="tick">✓</span> BDD Given/When/Then auto-generated covering happy path, error, edge case, and regulatory scenarios every sprint</td>
+      <td><span class="tick">✓</span> BDD Given/When/Then auto-generated covering happy path, error, edge case, and regulatory scenarios — then adversarially stress-tested by Agent 05B before development starts</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
+      <td class="benefit-label">AC Robustness (Game Theory)</td>
+      <td>No challenge mechanism — weak ACs pass into development, defects surface in UAT</td>
+      <td><span class="tick">✓</span> Adversarial Challenger (Minimax) identifies ambiguous Given steps, non-observable outcomes, and missing FCA error paths before a line of code is written</td>
     </tr>
     <tr>
       <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
@@ -363,29 +417,31 @@
   <!-- STATUS -->
   <div class="section-title">Current Status</div>
   <div class="status-row">
-    <span class="badge badge-green">✓ 53/53 Agents Validated</span>
-    <span class="badge badge-green">✓ 1,065 Tests Passing</span>
+    <span class="badge badge-green">✓ 54/54 Agents Validated</span>
+    <span class="badge badge-green">✓ 1,078 Tests Passing</span>
     <span class="badge badge-green">✓ 12 Gates Implemented</span>
     <span class="badge badge-green">✓ FCA Validation Complete</span>
-    <span class="badge badge-green">✓ HTML Report Generated</span>
+    <span class="badge badge-green">✓ Game Theory Enhanced</span>
     <span class="badge badge-amber">⚠ 18 Production Gaps Documented</span>
     <span class="badge badge-navy">→ Deployment Sequence Ready</span>
   </div>
 
   <p style="font-size:9.5pt; color:#4a5a6a; line-height:1.5; margin-top:4px;">
-    The framework is <strong>fully built and validated</strong>. Eighteen production-readiness gaps
-    (infrastructure provisioning, secrets management, Jira/Copado credentials, Compliance sign-off)
-    are documented in <em>PRODUCTION_READINESS.md</em> with effort estimates, acceptance criteria,
-    and a recommended deployment sequence.
+    The framework is <strong>fully built, game-theory enhanced, and validated</strong>. 54 agents,
+    1,078 passing tests, and four new mathematically-principled quality mechanisms are live on the
+    <em>game-theory-feature</em> branch. Eighteen production-readiness gaps (infrastructure
+    provisioning, secrets management, Jira/Copado credentials, Compliance sign-off) are documented
+    in <em>PRODUCTION_READINESS.md</em> with effort estimates and a recommended deployment sequence.
   </p>
 
   <!-- NEXT STEP -->
   <div class="section-title">Recommended Next Step</div>
   <div class="cta">
-    <strong>Approve production deployment:</strong> commission infrastructure provisioning, assign
-    owners for the 18-gap closure plan, and schedule a pilot sprint to run the framework alongside
-    the existing manual QE process — measuring AC quality delta, FCA scenario coverage, and time
-    saved. Target: framework live for next quarter's sprint cycle.
+    <strong>Approve production deployment:</strong> merge the game-theory-feature branch to master,
+    commission infrastructure provisioning, assign owners for the 18-gap closure plan, and schedule
+    a pilot sprint running the framework alongside the existing manual QE process — measuring AC
+    quality delta (adversarial challenge score), FCA scenario coverage, and time saved per story.
+    Target: framework live for next quarter's sprint cycle.
   </div>
 
 </div><!-- /page -->

@@ -15,8 +15,9 @@ from src.core.schemas import initial_story_state
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _state_with(agent_data: dict[str, dict]) -> dict:
+def _state_with(agent_data: dict[str, dict], fca_classification: str = "MEDIUM") -> dict:
     state = initial_story_state("FSC-2417")
+    state["fca_classification"] = fca_classification
     for agent_id, data in agent_data.items():
         state["agent_results"][agent_id] = {"data": data}
     return state

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from src.agents.base import adaptive_threshold
 from src.core.config import settings
 from src.core.schemas import StoryState
 from src.fleet_commander.worker import dispatch_agent
@@ -81,16 +82,23 @@ async def run_agent_4(state: StoryState) -> StoryState:
 
 
 async def run_batch_3(state: StoryState) -> StoryState:
-    """Parallel: Agent 5 (AC Generator) + Agent 6 (Test Design Strategy)."""
-    results = await asyncio.gather(
-        dispatch_agent(agent_id=5, state=state),
-        dispatch_agent(agent_id=6, state=state),
-        return_exceptions=True,
-    )
+    """Parallel: Agent 5 (AC Generator) + Agent 6 (Test Design Strategy).
+    Agent 5 runs first (its output feeds Agent 5B); then 5B + 6 run in parallel."""
+    # Step A: run Agent 5 to produce AC clauses
+    agent5_result = await dispatch_agent(agent_id=5, state=state)
     agent_results = dict(state["agent_results"])
     phase_errors = list(state["phase_errors"])
+    agent_results["5"] = agent5_result
 
-    for agent_id, result in zip([5, 6], results):
+    # Step B: Agent 5B (AC Challenger) and Agent 6 in parallel, with Agent 5 output available
+    state_with_5 = {**state, "agent_results": agent_results, "phase_errors": phase_errors}
+    results = await asyncio.gather(
+        dispatch_agent(agent_id=54, state=state_with_5),  # AC Challenger (Agent 05B)
+        dispatch_agent(agent_id=6, state=state_with_5),   # Test Design Strategy
+        return_exceptions=True,
+    )
+
+    for agent_id, result in zip([54, 6], results):
         if isinstance(result, Exception):
             phase_errors.append(f"Agent {agent_id} failed: {result}")
         else:
@@ -128,8 +136,12 @@ async def evaluate_g1(state: StoryState) -> StoryState:
     invest_result = agent_results.get("2", {})
     invest_score = invest_result.get("data", {}).get("invest_score", 0)
 
-    # Hard block: INVEST score below threshold
-    if invest_score < 80:
+    # Adaptive G1 threshold — stricter for HIGH-FCA, lenient for LOW-FCA
+    fca_tier = state.get("fca_classification", "UNCLASSIFIED")
+    invest_threshold = adaptive_threshold(80, fca_tier)
+
+    # Hard block: INVEST score below adaptive threshold
+    if invest_score < invest_threshold:
         gate_states["G1"] = {
             "gate_id": "G1", "status": "BLOCKED",
             "decided_at": datetime.now(timezone.utc).isoformat(),
@@ -139,7 +151,10 @@ async def evaluate_g1(state: StoryState) -> StoryState:
             **state,
             "current_phase": "BLOCKED",
             "gate_states": gate_states,
-            "block_reason": f"INVEST score {invest_score} is below the 80 threshold. Story requires rework.",
+            "block_reason": (
+                f"INVEST score {invest_score} is below the {invest_threshold} threshold "
+                f"(adaptive for {fca_tier}-FCA). Story requires rework."
+            ),
         }
 
     # Hard block: FCA classification missing

@@ -28,6 +28,7 @@ AGENT_REGISTRY: dict[int, str] = {
     7:  "src.agents.refinement.agent_07_data_need",
     8:  "src.agents.refinement.agent_08_dependency_mapping",
     9:  "src.agents.refinement.agent_09_risk_anticipation",
+    54: "src.agents.refinement.agent_05b_ac_challenger",  # AC Challenger (adversarial, runs in Batch 3)
     # Development phase
     10: "src.agents.development.agent_10_ac_compliance",
     11: "src.agents.development.agent_11_branch_tracer",

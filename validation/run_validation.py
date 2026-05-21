@@ -50,6 +50,7 @@ AGENT_META: dict[int, dict] = {
     4:  {"name": "Consumer Duty Mapper",          "phase": "Refinement",  "class": "True AI"},
     5:  {"name": "AC Generator",                 "phase": "Refinement",  "class": "True AI"},
     6:  {"name": "Test Design Strategy",         "phase": "Refinement",  "class": "True AI"},
+    54: {"name": "AC Challenger",                "phase": "Refinement",  "class": "True AI"},
     7:  {"name": "Data Need Agent",              "phase": "Refinement",  "class": "Augmented Script"},
     8:  {"name": "Dependency Mapping",           "phase": "Refinement",  "class": "Augmented Script"},
     9:  {"name": "Risk Anticipation",            "phase": "Refinement",  "class": "True AI"},
@@ -101,8 +102,8 @@ AGENT_META: dict[int, dict] = {
 
 # ── Execution batches (preserves dependency order) ────────────────────────────
 EXECUTION_PLAN: list[list[int]] = [
-    # Refinement
-    [1, 8], [2, 3, 7], [4], [5, 6], [9],
+    # Refinement (54=AC Challenger runs after Agent 5, before Agent 9)
+    [1, 8], [2, 3, 7], [4], [5], [54, 6], [9],
     # Development
     [10, 11, 13], [12, 14, 15, 16], [17, 18], [19], [20, 21], [22], [23],
     # Testing

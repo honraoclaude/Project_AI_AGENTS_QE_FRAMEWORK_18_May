@@ -30,7 +30,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import TierBScorer, build_system, call_with_tool
+from src.agents.base import ShapleyAttributor, TierBScorer, build_system, call_with_tool
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 
@@ -131,7 +131,7 @@ async def run(state: StoryState) -> AgentResult:
     narrative = result_data.get("narrative", "FCA Evidence Pack compiled.")
 
     confidence_score, signals = _compute_confidence(
-        agent3_data, agent30_data, agent33_data, agent36_data, verdict,
+        agent3_data, agent30_data, agent33_data, agent36_data, verdict, state,
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
 
@@ -176,6 +176,7 @@ def _compute_confidence(
     agent33_data: dict | None,
     agent36_data: dict | None,
     verdict: str,
+    state: StoryState,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=65)
 
@@ -193,6 +194,14 @@ def _compute_confidence(
         scorer.add("evidence_complete", True, +5)
     elif verdict == "MISSING":
         scorer.add("evidence_missing", True, -10)
+
+    # Shapley attribution: fair credit for each upstream agent's contribution to evidence pack
+    attributor = ShapleyAttributor()
+    for aid in ["3", "4", "30", "33", "36"]:
+        result = state["agent_results"].get(aid, {})
+        conf = result.get("confidence", {}).get("final_score", 0)
+        attributor.add_agent(f"agent_{aid}", conf, aid in state["agent_results"])
+    scorer.add("shapley_attributions", attributor.compute(), 0)
 
     scorer.cap(92).floor(20)
     return scorer.build()

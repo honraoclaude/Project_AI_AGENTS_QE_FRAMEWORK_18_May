@@ -39,7 +39,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import TierBScorer, build_system, call_with_tool
+from src.agents.base import ShapleyAttributor, TierBScorer, build_system, call_with_tool, get_agent_result
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_story
@@ -188,21 +188,31 @@ Use the assess_story_risks tool to return your assessment.
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
 
-    # Collect all upstream data
-    agent1_data = _get_agent_data(state, "1")
-    agent2_data = _get_agent_data(state, "2")
-    agent3_data = _get_agent_data(state, "3")
-    agent4_data = _get_agent_data(state, "4")
-    agent5_data = _get_agent_data(state, "5")
-    agent6_data = _get_agent_data(state, "6")
-    agent7_data = _get_agent_data(state, "7")
-    agent8_data = _get_agent_data(state, "8")
+    # Collect all upstream data + confidence scores (game theory: confidence-weighted synthesis)
+    agent1_data, agent1_conf = get_agent_result(state, "1")
+    agent2_data, agent2_conf = get_agent_result(state, "2")
+    agent3_data, agent3_conf = get_agent_result(state, "3")
+    agent4_data, agent4_conf = get_agent_result(state, "4")
+    agent5_data, agent5_conf = get_agent_result(state, "5")
+    agent6_data, agent6_conf = get_agent_result(state, "6")
+    agent7_data, agent7_conf = get_agent_result(state, "7")
+    agent8_data, agent8_conf = get_agent_result(state, "8")
+    # Agent 05B (AC Challenger) — registered as id 54 in the registry
+    agent5b_data, agent5b_conf = get_agent_result(state, "54")
 
     story = await get_story(story_id)
 
     user_message = _build_user_message(
-        story, agent1_data, agent2_data, agent3_data,
-        agent4_data, agent5_data, agent6_data, agent7_data, agent8_data,
+        story,
+        agent1_data, agent1_conf,
+        agent2_data, agent2_conf,
+        agent3_data, agent3_conf,
+        agent4_data, agent4_conf,
+        agent5_data, agent5_conf,
+        agent6_data, agent6_conf,
+        agent7_data, agent7_conf,
+        agent8_data, agent8_conf,
+        agent5b_data, agent5b_conf,
     )
 
     extracted = await call_with_tool(
@@ -216,7 +226,12 @@ async def run(state: StoryState) -> AgentResult:
     )
 
     confidence_score, signals = _compute_confidence(
-        agent3_data, agent4_data, agent5_data, agent8_data, extracted
+        agent3_data, agent3_conf,
+        agent4_data,
+        agent5_data, agent5b_data,
+        agent8_data,
+        extracted,
+        state,
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
     fca_class = (agent3_data or {}).get("fca_classification", state.get("fca_classification", "UNCLASSIFIED"))
@@ -271,17 +286,22 @@ async def run(state: StoryState) -> AgentResult:
 
 def _compute_confidence(
     agent3_data: dict | None,
+    agent3_conf: int,
     agent4_data: dict | None,
     agent5_data: dict | None,
+    agent5b_data: dict | None,
     agent8_data: dict | None,
     extracted: dict,
+    state: StoryState,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=60)
 
-    # Signal 1: Agent 3 ensemble agreement → reliable FCA context → confident risk assessment
+    # Signal 1 (confidence-weighted): Agent 3 ensemble agreement weighted by its confidence.
+    # High-confidence FCA classification agreement contributes more than a low-confidence one.
     if agent3_data:
         if agent3_data.get("ensemble_agreement"):
-            scorer.add("agent3_agreed", True, +8)
+            weighted_bonus = round(8 * (agent3_conf / 100))
+            scorer.add("agent3_agreed_weighted", agent3_conf, +weighted_bonus)
         else:
             scorer.add("agent3_disagreed", True, -5)
     else:
@@ -320,6 +340,31 @@ def _compute_confidence(
     if extracted.get("critical_risk_count", 0) > 0:
         scorer.add("critical_risks_identified", extracted["critical_risk_count"], +5)
 
+    # Signal 8 (adversarial): Agent 05B challenge — adjust for AC weakness findings
+    if agent5b_data is not None:
+        critical_weaknesses = agent5b_data.get("critical_weakness_count", 0)
+        ac_count = agent5b_data.get("ac_count_challenged", 0)
+        survivor_count = agent5b_data.get("survivor_count", ac_count)
+        if critical_weaknesses == 0:
+            scorer.add("ac_challenge_passed", True, +8)
+        elif critical_weaknesses <= 2:
+            scorer.add("ac_challenge_minor_issues", critical_weaknesses, 0)
+        else:
+            scorer.add("ac_challenge_failed", critical_weaknesses, -10)
+        scorer.add("ac_survivor_count", survivor_count, 0)  # informational
+
+    # Shapley attribution: fair credit for each upstream agent's contribution
+    attributor = ShapleyAttributor()
+    attributor.add_agent("1", state["agent_results"].get("1", {}).get("confidence", {}).get("final_score", 0), "1" in state["agent_results"])
+    attributor.add_agent("2", state["agent_results"].get("2", {}).get("confidence", {}).get("final_score", 0), "2" in state["agent_results"])
+    attributor.add_agent("3", agent3_conf, agent3_data is not None)
+    attributor.add_agent("4", state["agent_results"].get("4", {}).get("confidence", {}).get("final_score", 0), agent4_data is not None)
+    attributor.add_agent("5", state["agent_results"].get("5", {}).get("confidence", {}).get("final_score", 0), agent5_data is not None)
+    attributor.add_agent("5b", state["agent_results"].get("54", {}).get("confidence", {}).get("final_score", 0), agent5b_data is not None)
+    attributor.add_agent("6", state["agent_results"].get("6", {}).get("confidence", {}).get("final_score", 0), "6" in state["agent_results"])
+    attributor.add_agent("8", state["agent_results"].get("8", {}).get("confidence", {}).get("final_score", 0), agent8_data is not None)
+    scorer.add("shapley_attributions", attributor.compute(), 0)  # informational — no score delta
+
     scorer.cap(92).floor(20)
     return scorer.build()
 
@@ -332,7 +377,7 @@ def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:
 
 
 def _count_available_agents(state: StoryState) -> int:
-    return sum(1 for k in ["1", "2", "3", "4", "5", "6", "7", "8"]
+    return sum(1 for k in ["1", "2", "3", "4", "5", "6", "7", "8", "54"]
                if k in state["agent_results"])
 
 
@@ -340,24 +385,27 @@ def _count_available_agents(state: StoryState) -> int:
 
 def _build_user_message(
     story: dict,
-    agent1_data: dict | None,
-    agent2_data: dict | None,
-    agent3_data: dict | None,
-    agent4_data: dict | None,
-    agent5_data: dict | None,
-    agent6_data: dict | None,
-    agent7_data: dict | None,
-    agent8_data: dict | None,
+    agent1_data: dict | None, agent1_conf: int,
+    agent2_data: dict | None, agent2_conf: int,
+    agent3_data: dict | None, agent3_conf: int,
+    agent4_data: dict | None, agent4_conf: int,
+    agent5_data: dict | None, agent5_conf: int,
+    agent6_data: dict | None, agent6_conf: int,
+    agent7_data: dict | None, agent7_conf: int,
+    agent8_data: dict | None, agent8_conf: int,
+    agent5b_data: dict | None, agent5b_conf: int,
 ) -> str:
     lines = [
         f"Synthesise the following upstream Refinement agent findings into a risk register.\n",
         f"STORY ID: {story['story_id']}",
         f"SUMMARY:  {story['summary']}\n",
+        "NOTE: Each agent section shows its confidence score in brackets. "
+        "Lower-confidence findings carry more uncertainty and should inform risk severity.\n",
     ]
 
     if agent1_data:
         lines.append(
-            f"AGENT 1 — STORY INTENT:\n"
+            f"AGENT 1 — STORY INTENT [confidence: {agent1_conf}]:\n"
             f"  Goal: {agent1_data.get('goal', 'UNKNOWN')}\n"
             f"  Persona: {agent1_data.get('persona', 'UNKNOWN')}\n"
             f"  FSC Objects: {', '.join(agent1_data.get('fsc_objects', [])) or 'None'}\n"
@@ -367,7 +415,7 @@ def _build_user_message(
 
     if agent2_data:
         lines.append(
-            f"AGENT 2 — INVEST QUALITY:\n"
+            f"AGENT 2 — INVEST QUALITY [confidence: {agent2_conf}]:\n"
             f"  INVEST Score: {agent2_data.get('invest_score', 'N/A')}/100 "
             f"({agent2_data.get('invest_verdict', 'N/A')})\n"
             f"  Blocking Issues: {'; '.join(agent2_data.get('blocking_issues', [])) or 'None'}"
@@ -375,7 +423,7 @@ def _build_user_message(
 
     if agent3_data:
         lines.append(
-            f"AGENT 3 — FCA CLASSIFICATION:\n"
+            f"AGENT 3 — FCA CLASSIFICATION [confidence: {agent3_conf}]:\n"
             f"  Tier: {agent3_data.get('fca_classification', 'UNCLASSIFIED')}\n"
             f"  Ensemble Agreement: {agent3_data.get('ensemble_agreement', 'N/A')}\n"
             f"  Triggers: {', '.join(agent3_data.get('fca_triggers', [])) or 'None'}"
@@ -383,7 +431,7 @@ def _build_user_message(
 
     if agent4_data:
         lines.append(
-            f"AGENT 4 — CONSUMER DUTY:\n"
+            f"AGENT 4 — CONSUMER DUTY [confidence: {agent4_conf}]:\n"
             f"  Verdict: {agent4_data.get('cd_verdict', 'N/A')}\n"
             f"  Vulnerable Customer Impact: {agent4_data.get('vulnerable_customer_impact', False)}\n"
             f"  CD Risks: {'; '.join(agent4_data.get('cd_risks', [])) or 'None'}\n"
@@ -393,7 +441,7 @@ def _build_user_message(
     if agent5_data:
         coverage = agent5_data.get("coverage_assessment", {})
         lines.append(
-            f"AGENT 5 — AC GENERATOR:\n"
+            f"AGENT 5 — AC GENERATOR [confidence: {agent5_conf}]:\n"
             f"  Mode: {agent5_data.get('generation_mode', 'N/A')}\n"
             f"  Clause Count: {agent5_data.get('ac_clause_count', 0)}\n"
             f"  Coverage: happy={coverage.get('happy_path')}, error={coverage.get('error_paths')}, "
@@ -401,16 +449,27 @@ def _build_user_message(
             f"  Remaining Gaps: {'; '.join(agent5_data.get('remaining_gaps', [])) or 'None'}"
         )
 
+    if agent5b_data:
+        findings_count = len(agent5b_data.get("challenge_findings", []))
+        lines.append(
+            f"AGENT 5B — AC CHALLENGER [confidence: {agent5b_conf}]:\n"
+            f"  Clauses Challenged: {agent5b_data.get('ac_count_challenged', 0)}\n"
+            f"  Survivors (no critical/major weakness): {agent5b_data.get('survivor_count', 0)}\n"
+            f"  Critical Weaknesses Found: {agent5b_data.get('critical_weakness_count', 0)}\n"
+            f"  Total Findings: {findings_count}\n"
+            f"  Summary: {agent5b_data.get('challenge_summary', 'N/A')}"
+        )
+
     if agent6_data:
         lines.append(
-            f"AGENT 6 — TEST DESIGN:\n"
+            f"AGENT 6 — TEST DESIGN [confidence: {agent6_conf}]:\n"
             f"  Coverage Target: {agent6_data.get('coverage_target_pct', 'N/A')}%\n"
             f"  Risk Areas: {'; '.join(agent6_data.get('risk_areas', [])) or 'None'}"
         )
 
     if agent7_data:
         lines.append(
-            f"AGENT 7 — DATA NEEDS:\n"
+            f"AGENT 7 — DATA NEEDS [confidence: {agent7_conf}]:\n"
             f"  Data Volume: {agent7_data.get('data_volume', 'N/A')}\n"
             f"  Sensitive Data: {agent7_data.get('sensitive_data_present', False)}\n"
             f"  Data Risks: {'; '.join(agent7_data.get('risks', [])) or 'None'}"
@@ -418,7 +477,7 @@ def _build_user_message(
 
     if agent8_data:
         lines.append(
-            f"AGENT 8 — DEPENDENCY MAPPING:\n"
+            f"AGENT 8 — DEPENDENCY MAPPING [confidence: {agent8_conf}]:\n"
             f"  Detected Objects: {', '.join(agent8_data.get('detected_objects', [])) or 'None'}\n"
             f"  Implied Objects: {', '.join(agent8_data.get('implied_objects', [])) or 'None'}\n"
             f"  Dependency Depth: {agent8_data.get('dependency_depth', 0)}"

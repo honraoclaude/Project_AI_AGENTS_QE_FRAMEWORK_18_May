@@ -54,11 +54,37 @@ _TOOL_DESCRIPTION = (
 
 _AC_CLAUSE_SCHEMA = {
     "type": "object",
-    "required": ["scenario", "given", "when", "then", "scenario_type", "fca_relevant"],
+    "required": ["scenario", "scenario_type", "test_category", "fca_relevant", "given", "when", "then"],
     "properties": {
         "scenario": {
             "type": "string",
             "description": "Scenario title. Format: 'Scenario: <descriptive title>'.",
+        },
+        "scenario_type": {
+            "type": "string",
+            "enum": ["happy_path", "error_path", "edge_case", "regulatory"],
+            "description": (
+                "happy_path: the primary success flow. "
+                "error_path: a precondition fails or an invalid action is attempted. "
+                "edge_case: boundary condition, duplicate, concurrent access, or unusual state. "
+                "regulatory: directly tests an FCA obligation (COBS, Consumer Duty, FG21/1)."
+            ),
+        },
+        "test_category": {
+            "type": "string",
+            "enum": ["UNIT", "UI", "FUNCTIONAL", "REGRESSION", "AUTOMATION_CANDIDATE"],
+            "description": (
+                "Execution layer for this scenario. "
+                "UNIT: isolated Apex trigger/class logic with no UI involvement. "
+                "UI: LWC/Aura component behaviour directly visible to the user. "
+                "FUNCTIONAL: end-to-end Salesforce flow spanning Apex, data, and UI. "
+                "REGRESSION: guard scenario for a known past defect or high-risk area. "
+                "AUTOMATION_CANDIDATE: stable, deterministic scenario ready for automation suite."
+            ),
+        },
+        "fca_relevant": {
+            "type": "boolean",
+            "description": "True if this scenario tests behaviour with direct FCA regulatory implications.",
         },
         "given": {
             "type": "array",
@@ -75,20 +101,6 @@ _AC_CLAUSE_SCHEMA = {
             "items": {"type": "string"},
             "description": "Then steps. Each string starts with 'Then' or 'And'.",
         },
-        "scenario_type": {
-            "type": "string",
-            "enum": ["happy_path", "error_path", "edge_case", "regulatory"],
-            "description": (
-                "happy_path: the primary success flow. "
-                "error_path: a precondition fails or an invalid action is attempted. "
-                "edge_case: boundary condition, duplicate, concurrent access, or unusual state. "
-                "regulatory: directly tests an FCA obligation (COBS, Consumer Duty, FG21/1)."
-            ),
-        },
-        "fca_relevant": {
-            "type": "boolean",
-            "description": "True if this scenario tests behaviour with direct FCA regulatory implications.",
-        },
     },
 }
 
@@ -97,9 +109,9 @@ _TOOL_SCHEMA = {
     "required": [
         "generation_mode",
         "coverage_assessment",
+        "ac_clauses",
         "gaps_filled",
         "remaining_gaps",
-        "ac_clauses",
     ],
     "properties": {
         "ac_clauses": {
@@ -205,6 +217,21 @@ Required scenario coverage:
    For FG21/1: test that VulnerableCustomerIndicator__c = true triggers the correct pathway.
 
 For LOW-FCA stories: regulatory scenario is optional. Focus on happy path + error path at minimum.
+
+CRITICAL OUTPUT RULES — read before filling the tool schema:
+- ac_clauses: this is where EVERY scenario you write goes. Each entry is a full Gherkin object
+  with given/when/then arrays. Generate 6–12 clauses for a typical story. Never leave this empty.
+- gaps_filled: ONE-LINE labels ONLY, e.g. "error_path: missing RiskProfile__c". These are short
+  summary names for the scenarios you added — NOT the scenario text itself.
+- Do NOT put scenario descriptions as narrative strings inside gaps_filled. The Gherkin scenarios
+  belong in ac_clauses. gaps_filled is just an audit log of what scenario types were covered.
+
+Choosing test_category for each scenario:
+- happy_path scenarios involving LWC screens → UI or AUTOMATION_CANDIDATE
+- error_path / edge_case driven by Apex trigger or class → FUNCTIONAL
+- pure Apex unit-testable logic (no UI, no flow) → UNIT
+- scenario guarding against a known past defect or high-risk regression → REGRESSION
+- any stable, deterministic scenario suitable for the automation suite → AUTOMATION_CANDIDATE
 """.strip()
 
 

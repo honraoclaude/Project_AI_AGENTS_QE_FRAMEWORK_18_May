@@ -97,47 +97,51 @@ MOCK_AC_GENERATED = {
     "ac_clauses": [
         {
             "scenario": "Scenario: Adviser records suitability for standard client",
+            "scenario_type": "happy_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
             "given": ["Given the client has a RiskProfile__c with risk_level = Moderate"],
             "when": ["When the adviser completes the Suitability Assessment screen flow"],
             "then": [
                 "Then a Suitability__c record is created linked to the FinancialAccount",
                 "Then the status field is set to 'Assessment Complete'",
             ],
-            "scenario_type": "happy_path",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Vulnerable customer — additional Consumer Duty confirmation",
+            "scenario_type": "regulatory",
+            "test_category": "UI",
+            "fca_relevant": True,
             "given": ["Given VulnerableCustomerIndicator__c is true for the client"],
             "when": ["When the adviser reaches the final step of the Suitability flow"],
             "then": [
                 "Then a Consumer Duty confirmation checkbox is displayed",
                 "Then the assessment cannot be submitted without checking the box",
             ],
-            "scenario_type": "regulatory",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: RiskProfile missing — assessment blocked",
+            "scenario_type": "error_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
             "given": ["Given the client has no RiskProfile__c record"],
             "when": ["When the adviser attempts to open the Suitability Assessment flow"],
             "then": [
                 "Then an error message 'Risk profile required' is displayed",
                 "Then no Suitability__c record is created",
             ],
-            "scenario_type": "error_path",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Assessment already exists — duplicate prevented",
+            "scenario_type": "edge_case",
+            "test_category": "REGRESSION",
+            "fca_relevant": False,
             "given": ["Given a Suitability__c record already exists for this FinancialAccount"],
             "when": ["When the adviser attempts to create a new assessment"],
             "then": [
                 "Then the existing assessment is displayed",
                 "Then a new Suitability__c record is not created",
             ],
-            "scenario_type": "edge_case",
-            "fca_relevant": False,
         },
     ],
     "generation_mode": "generated_from_scratch",
@@ -161,35 +165,39 @@ MOCK_AC_VALIDATED = {
     "ac_clauses": [
         {
             "scenario": "Scenario: Adviser records suitability",
+            "scenario_type": "happy_path",
+            "test_category": "AUTOMATION_CANDIDATE",
+            "fca_relevant": True,
             "given": ["Given the client has a RiskProfile__c"],
             "when": ["When the adviser submits the assessment"],
             "then": ["Then a Suitability__c record is created"],
-            "scenario_type": "happy_path",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Consumer Duty confirmation for vulnerable client",
+            "scenario_type": "regulatory",
+            "test_category": "UI",
+            "fca_relevant": True,
             "given": ["Given VulnerableCustomerIndicator__c is true"],
             "when": ["When the adviser completes the flow"],
             "then": ["Then a Consumer Duty checkbox is shown"],
-            "scenario_type": "regulatory",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Missing RiskProfile blocks submission",
+            "scenario_type": "error_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
             "given": ["Given no RiskProfile__c exists"],
             "when": ["When the adviser attempts submission"],
             "then": ["Then an error is shown"],
-            "scenario_type": "error_path",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Duplicate assessment blocked",
+            "scenario_type": "edge_case",
+            "test_category": "REGRESSION",
+            "fca_relevant": False,
             "given": ["Given an assessment already exists"],
             "when": ["When the adviser tries to create another"],
             "then": ["Then the duplicate is blocked"],
-            "scenario_type": "edge_case",
-            "fca_relevant": False,
         },
     ],
     "generation_mode": "validated_existing",
@@ -208,19 +216,21 @@ MOCK_AC_LOW_FCA = {
     "ac_clauses": [
         {
             "scenario": "Scenario: Button label shows Submit on Account page",
+            "scenario_type": "happy_path",
+            "test_category": "UI",
+            "fca_relevant": False,
             "given": ["Given the user is on the Account detail page"],
             "when": ["When the page loads"],
             "then": ["Then the button shows 'Submit' instead of 'Save'"],
-            "scenario_type": "happy_path",
-            "fca_relevant": False,
         },
         {
             "scenario": "Scenario: Label correct on mobile viewport",
+            "scenario_type": "edge_case",
+            "test_category": "AUTOMATION_CANDIDATE",
+            "fca_relevant": False,
             "given": ["Given the user views the Account page on a mobile device"],
             "when": ["When the page renders"],
             "then": ["Then the button label shows 'Submit'"],
-            "scenario_type": "edge_case",
-            "fca_relevant": False,
         },
     ],
     "generation_mode": "generated_from_scratch",
@@ -239,27 +249,30 @@ MOCK_AC_NO_REGULATORY = {
     "ac_clauses": [
         {
             "scenario": "Scenario: Adviser records suitability",
+            "scenario_type": "happy_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
             "given": ["Given the client has a RiskProfile__c"],
             "when": ["When the adviser submits"],
             "then": ["Then a record is created"],
-            "scenario_type": "happy_path",
-            "fca_relevant": True,
         },
         {
             "scenario": "Scenario: Error when RiskProfile missing",
+            "scenario_type": "error_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": False,
             "given": ["Given no RiskProfile__c"],
             "when": ["When the adviser submits"],
             "then": ["Then an error shows"],
-            "scenario_type": "error_path",
-            "fca_relevant": False,
         },
         {
             "scenario": "Scenario: Duplicate blocked",
+            "scenario_type": "edge_case",
+            "test_category": "REGRESSION",
+            "fca_relevant": False,
             "given": ["Given assessment exists"],
             "when": ["When adviser creates another"],
             "then": ["Then blocked"],
-            "scenario_type": "edge_case",
-            "fca_relevant": False,
         },
     ],
     "generation_mode": "generated_from_scratch",
@@ -431,12 +444,17 @@ class TestAgentRun:
 
             result = await run(state)
 
+        valid_test_categories = {"UNIT", "UI", "FUNCTIONAL", "REGRESSION", "AUTOMATION_CANDIDATE"}
         for clause in result.data["ac_clauses"]:
             assert "scenario" in clause
             assert "given" in clause and isinstance(clause["given"], list)
             assert "when" in clause and isinstance(clause["when"], list)
             assert "then" in clause and isinstance(clause["then"], list)
             assert "scenario_type" in clause
+            assert "test_category" in clause
+            assert clause["test_category"] in valid_test_categories, (
+                f"test_category '{clause['test_category']}' not in allowed values"
+            )
             assert "fca_relevant" in clause
 
     async def test_validated_mode_when_existing_acs_passed(self):

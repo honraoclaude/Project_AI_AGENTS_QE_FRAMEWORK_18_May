@@ -49,9 +49,9 @@ Gates:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from src.core.schemas import StoryState
+from src.fleet_commander.phases._helpers import _get_agent_data, _merge_results
 
 
 # ── Gate definitions ──────────────────────────────────────────────────────────
@@ -274,31 +274,3 @@ async def run_release_phase(state: StoryState) -> StoryState:
     return state
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _merge_results(
-    state: StoryState,
-    agent_ids: list[int],
-    results: list[Any],
-) -> StoryState:
-    """
-    Merge batch dispatch results into state. Failed agents (exceptions)
-    are logged but do not prevent other agents from running — gates
-    enforce the fail-closed logic.
-    """
-    for agent_id, result in zip(agent_ids, results):
-        if isinstance(result, Exception):
-            state["agent_results"][str(agent_id)] = {
-                "error": str(result),
-                "data": {},
-            }
-        else:
-            state["agent_results"][str(agent_id)] = result
-    return state
-
-
-def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:
-    result = state["agent_results"].get(agent_id)
-    if isinstance(result, dict):
-        return result.get("data") or result
-    return None

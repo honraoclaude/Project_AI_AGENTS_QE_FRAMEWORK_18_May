@@ -115,12 +115,11 @@ from typing import TypedDict  # noqa: E402
 
 class StoryState(TypedDict):
     story_id: str
-    fca_classification: str                  # FCAClassification
-    current_phase: str                       # Phase
+    fca_classification: FCAClassification
+    current_phase: Phase
     gate_states: dict[str, dict]             # {gate_id: GateState.model_dump()}
     agent_results: dict[str, dict]           # {str(agent_id): AgentResult.model_dump()}
     pending_approvals: list[dict]            # list of PendingApproval.model_dump()
-    conflicts_resolved: list[dict]           # list of ConflictResolution.model_dump()
     block_reason: Optional[str]
     phase_errors: list[str]
 
@@ -137,7 +136,6 @@ def initial_story_state(story_id: str) -> StoryState:
         },
         agent_results={},
         pending_approvals=[],
-        conflicts_resolved=[],
         block_reason=None,
         phase_errors=[],
     )

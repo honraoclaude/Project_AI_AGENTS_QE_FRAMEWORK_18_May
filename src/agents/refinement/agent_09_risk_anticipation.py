@@ -371,11 +371,6 @@ def _compute_confidence(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:
-    result = state["agent_results"].get(agent_id)
-    return result.get("data") if result else None
-
-
 def _count_available_agents(state: StoryState) -> int:
     return sum(1 for k in ["1", "2", "3", "4", "5", "6", "7", "8", "54"]
                if k in state["agent_results"])

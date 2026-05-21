@@ -170,7 +170,10 @@ async def call_with_tool(
         if block.type == "tool_use" and block.name == tool_name:
             return block.input  # type: ignore[return-value]
 
-    raise RuntimeError(f"Model did not call tool '{tool_name}' — response: {response}")
+    block_types = [b.type for b in response.content]
+    raise RuntimeError(
+        f"Model did not call tool '{tool_name}' — got {len(response.content)} block(s): {block_types}"
+    )
 
 
 # ── Tier B confidence scoring ─────────────────────────────────────────────────
@@ -233,6 +236,8 @@ class ShapleyAttributor:
         self._agents: list[tuple[str, int, bool]] = []
 
     def add_agent(self, agent_id: str, confidence: int, data_present: bool) -> None:
+        if not (0 <= confidence <= 100):
+            raise ValueError(f"confidence must be 0-100, got {confidence} for agent {agent_id}")
         self._agents.append((agent_id, confidence, data_present))
 
     def compute(self) -> dict[str, float]:
@@ -248,6 +253,8 @@ class ShapleyAttributor:
         return {aid: round(v / total * 100.0, 2) for aid, v in raw.items()}
 
 
+_VALID_FCA_TIERS = {"HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"}
+
 def adaptive_threshold(base: int, fca_tier: str, direction: str = "strict") -> int:
     """
     Returns a gate threshold adjusted for FCA regulatory risk tier.
@@ -258,5 +265,7 @@ def adaptive_threshold(base: int, fca_tier: str, direction: str = "strict") -> i
 
     Adjustments: HIGH=+5, MEDIUM=0, LOW=-5, UNCLASSIFIED=+10 (unknown = cautious).
     """
+    if fca_tier not in _VALID_FCA_TIERS:
+        raise ValueError(f"Unknown FCA tier '{fca_tier}'. Expected one of {_VALID_FCA_TIERS}")
     adjustments = {"HIGH": +5, "MEDIUM": 0, "LOW": -5, "UNCLASSIFIED": +10}
-    return base + adjustments.get(fca_tier, 0)
+    return base + adjustments[fca_tier]

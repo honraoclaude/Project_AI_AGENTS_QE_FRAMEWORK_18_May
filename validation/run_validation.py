@@ -207,6 +207,11 @@ SAMPLE_AC = [
 ]
 
 # ── Monitoring mock data ──────────────────────────────────────────────────────
+# Only 7 of 54 agents have signal rows here because Agent 52 (Severity Calibration)
+# only generates useful recommendations for agents with accumulated QE Lead feedback.
+# The 7 chosen are the agents most likely to have real override data in early operation:
+# agents 1-3 (Refinement core), 5 (AC Generator), 54 (AC Challenger), 33 (Coverage),
+# and 44 (FCA Evidence Pack). All other agents default to base=60 in _AGENT_BASE_MAP.
 MOCK_SIGNAL_ROWS = [
     {"agent_id": 1,  "total": 45, "fp": 3, "tp": 38, "fn": 2, "tn": 2},
     {"agent_id": 2,  "total": 45, "fp": 1, "tp": 42, "fn": 1, "tn": 1},
@@ -583,7 +588,7 @@ def _module_path(agent_id: int) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(story_id: str, skip_report: bool) -> None:
+async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> None:
     t_start = time.monotonic()
     output_dir = OUTPUT_DIR
 
@@ -608,10 +613,16 @@ async def main(story_id: str, skip_report: bool) -> None:
         generate_html_report(output_dir / story_id, report_path, story_id)
         print(f"  Report: {report_path}\n")
 
+    if dashboard:
+        from validation.generate_dashboard import generate as gen_dashboard
+        gen_dashboard(output_dir)
+        print()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--story", default="FSC-2417")
     parser.add_argument("--skip-report", action="store_true")
+    parser.add_argument("--dashboard", action="store_true")
     args = parser.parse_args()
-    asyncio.run(main(args.story, args.skip_report))
+    asyncio.run(main(args.story, args.skip_report, args.dashboard))

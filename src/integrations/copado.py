@@ -7,9 +7,14 @@ return empty defaults so Development agents degrade gracefully.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from src.core.config import settings
+
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = (1.0, 2.0, 4.0)  # seconds between attempts
 
 
 def _is_configured() -> bool:
@@ -18,6 +23,22 @@ def _is_configured() -> bool:
 
 def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {settings.copado_access_token.get_secret_value()}"}
+
+
+async def _get(url: str, *, params: dict | None = None, timeout: float = 15.0) -> dict:
+    """GET with 3-attempt exponential backoff. Raises on final failure."""
+    last_exc: Exception = RuntimeError("unreachable")
+    for attempt, delay in enumerate(_RETRY_BACKOFF):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, params=params, headers=_headers(), timeout=timeout)
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+            if attempt < _RETRY_ATTEMPTS - 1:
+                await asyncio.sleep(delay)
+    raise last_exc
 
 
 async def get_branch_for_story(story_id: str) -> dict:
@@ -30,23 +51,15 @@ async def get_branch_for_story(story_id: str) -> dict:
     if not _is_configured():
         return _empty_branch()
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{settings.copado_url}/api/v1/branches",
-            params={"story_id": story_id},
-            headers=_headers(),
-            timeout=10.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        branch = data.get("branches", [{}])[0]
-        return {
-            "branch_name": branch.get("name", ""),
-            "commit_sha": branch.get("latestCommitSha", ""),
-            "created_date": branch.get("createdDate", ""),
-            "last_commit_date": branch.get("lastCommitDate", ""),
-            "author_email": branch.get("authorEmail", ""),
-        }
+    data = await _get(f"{settings.copado_url}/api/v1/branches", params={"story_id": story_id}, timeout=10.0)
+    branch = data.get("branches", [{}])[0]
+    return {
+        "branch_name": branch.get("name", ""),
+        "commit_sha": branch.get("latestCommitSha", ""),
+        "created_date": branch.get("createdDate", ""),
+        "last_commit_date": branch.get("lastCommitDate", ""),
+        "author_email": branch.get("authorEmail", ""),
+    }
 
 
 async def get_changed_files(story_id: str, branch_name: str) -> list[dict]:
@@ -59,23 +72,16 @@ async def get_changed_files(story_id: str, branch_name: str) -> list[dict]:
     if not _is_configured():
         return []
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{settings.copado_url}/api/v1/branches/{branch_name}/changes",
-            headers=_headers(),
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return [
-            {
-                "file_path": item.get("filePath", ""),
-                "change_type": item.get("changeType", "modify"),
-                "object_type": item.get("metadataType", ""),
-                "object_name": item.get("componentName", ""),
-            }
-            for item in data.get("changes", [])
-        ]
+    data = await _get(f"{settings.copado_url}/api/v1/branches/{branch_name}/changes")
+    return [
+        {
+            "file_path": item.get("filePath", ""),
+            "change_type": item.get("changeType", "modify"),
+            "object_type": item.get("metadataType", ""),
+            "object_name": item.get("componentName", ""),
+        }
+        for item in data.get("changes", [])
+    ]
 
 
 async def get_apex_test_results(story_id: str) -> dict:
@@ -89,24 +95,16 @@ async def get_apex_test_results(story_id: str) -> dict:
     if not _is_configured():
         return _empty_test_results()
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{settings.copado_url}/api/v1/test-results",
-            params={"story_id": story_id},
-            headers=_headers(),
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        result = data.get("latestRun", {})
-        return {
-            "test_run_id": result.get("id", ""),
-            "tests_run": result.get("testsRun", 0),
-            "tests_passed": result.get("testsPassed", 0),
-            "tests_failed": result.get("testsFailed", 0),
-            "coverage_pct": result.get("codeCoveragePct", 0),
-            "run_date": result.get("runDate", ""),
-        }
+    data = await _get(f"{settings.copado_url}/api/v1/test-results", params={"story_id": story_id})
+    result = data.get("latestRun", {})
+    return {
+        "test_run_id": result.get("id", ""),
+        "tests_run": result.get("testsRun", 0),
+        "tests_passed": result.get("testsPassed", 0),
+        "tests_failed": result.get("testsFailed", 0),
+        "coverage_pct": result.get("codeCoveragePct", 0),
+        "run_date": result.get("runDate", ""),
+    }
 
 
 async def get_pmd_results(story_id: str) -> list[dict]:
@@ -120,26 +118,18 @@ async def get_pmd_results(story_id: str) -> list[dict]:
     if not _is_configured():
         return []
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{settings.copado_url}/api/v1/static-analysis",
-            params={"story_id": story_id},
-            headers=_headers(),
-            timeout=20.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return [
-            {
-                "rule_name": item.get("ruleName", ""),
-                "priority": item.get("priority", 3),
-                "description": item.get("description", ""),
-                "file_path": item.get("filePath", ""),
-                "line": item.get("line", 0),
-                "category": item.get("category", ""),
-            }
-            for item in data.get("violations", [])
-        ]
+    data = await _get(f"{settings.copado_url}/api/v1/static-analysis", params={"story_id": story_id}, timeout=20.0)
+    return [
+        {
+            "rule_name": item.get("ruleName", ""),
+            "priority": item.get("priority", 3),
+            "description": item.get("description", ""),
+            "file_path": item.get("filePath", ""),
+            "line": item.get("line", 0),
+            "category": item.get("category", ""),
+        }
+        for item in data.get("violations", [])
+    ]
 
 
 def _empty_branch() -> dict:

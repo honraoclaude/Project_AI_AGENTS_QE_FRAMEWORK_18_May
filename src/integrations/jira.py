@@ -46,7 +46,7 @@ async def get_acceptance_criteria(story_id: str) -> list[dict]:
         fields = issue.fields
         clauses: list[dict] = []
 
-        ac_field = getattr(fields, "customfield_10200", None)
+        ac_field = getattr(fields, settings.jira_ac_field, None)
         source = ac_field or fields.description or ""
         if source:
             clauses.extend(_parse_gherkin(source, "jira"))

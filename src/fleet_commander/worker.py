@@ -80,6 +80,25 @@ AGENT_REGISTRY: dict[int, str] = {
 }
 
 
+def validate_registry() -> None:
+    """
+    Verify every module in AGENT_REGISTRY can be imported.
+    Call at startup so missing agents are caught before any story runs.
+    Raises ImportError with the list of broken entries.
+    """
+    failures: list[str] = []
+    for agent_id, module_path in AGENT_REGISTRY.items():
+        try:
+            importlib.import_module(module_path)
+        except ImportError as exc:
+            failures.append(f"Agent {agent_id} ({module_path}): {exc}")
+    if failures:
+        raise ImportError(
+            f"AGENT_REGISTRY has {len(failures)} unresolvable module(s):\n"
+            + "\n".join(failures)
+        )
+
+
 async def dispatch_agent(agent_id: int, state: StoryState) -> dict:
     """
     Load the agent module, call its run() function, record the execution,

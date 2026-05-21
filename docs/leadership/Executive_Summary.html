@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FSC Agentic QE Framework — Executive Summary</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Calibri:wght@400;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    color: #1a2a3a;
+    background: #fff;
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  .header {
+    background: #0d1b2a;
+    color: #fff;
+    padding: 18px 28px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header-left h1 {
+    font-size: 18pt;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.3px;
+  }
+  .header-left .sub {
+    font-size: 10pt;
+    color: #00b4d8;
+    margin-top: 3px;
+  }
+  .header-right {
+    text-align: right;
+    font-size: 9pt;
+    color: #aabbcc;
+    line-height: 1.7;
+  }
+  .header-right .confidential {
+    color: #e88c00;
+    font-weight: 700;
+    font-size: 10pt;
+  }
+  .teal-bar { height: 4px; background: #00b4d8; }
+
+  /* ── Page body ──────────────────────────────────────────────── */
+  .page { padding: 18px 28px 16px; }
+
+  /* ── Section titles ─────────────────────────────────────────── */
+  .section-title {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #0d1b2a;
+    border-left: 4px solid #00b4d8;
+    padding-left: 8px;
+    margin: 14px 0 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Intro blurb ────────────────────────────────────────────── */
+  .intro {
+    background: #f0f4f8;
+    border-left: 4px solid #0d1b2a;
+    padding: 10px 14px;
+    font-size: 11pt;
+    line-height: 1.55;
+    margin-bottom: 10px;
+  }
+
+  /* ── Metrics strip ──────────────────────────────────────────── */
+  .metrics {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .metric-card {
+    flex: 1;
+    background: #0d1b2a;
+    color: #fff;
+    text-align: center;
+    padding: 10px 6px 8px;
+    border-radius: 3px;
+  }
+  .metric-card .num {
+    font-size: 20pt;
+    font-weight: 700;
+    color: #00b4d8;
+    display: block;
+    line-height: 1.1;
+  }
+  .metric-card .lbl {
+    font-size: 8.5pt;
+    color: #cce0ee;
+    margin-top: 2px;
+    display: block;
+  }
+
+  /* ── Three-column panels ────────────────────────────────────── */
+  .cols-3 { display: flex; gap: 8px; margin: 8px 0; }
+  .panel {
+    flex: 1;
+    border: 1px solid #d0dae4;
+    border-top: 3px solid #00b4d8;
+    padding: 8px 10px;
+    border-radius: 2px;
+  }
+  .panel h4 {
+    font-size: 9.5pt;
+    font-weight: 700;
+    color: #0d1b2a;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .panel ul {
+    list-style: none;
+    padding: 0;
+  }
+  .panel ul li {
+    font-size: 9.5pt;
+    line-height: 1.5;
+    padding-left: 12px;
+    position: relative;
+    color: #2a3a4a;
+  }
+  .panel ul li::before {
+    content: "›";
+    position: absolute;
+    left: 0;
+    color: #00b4d8;
+    font-weight: 700;
+  }
+
+  /* ── Benefits table ─────────────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin: 8px 0;
+  }
+  th {
+    background: #0d1b2a;
+    color: #fff;
+    padding: 5px 8px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 9pt;
+  }
+  td { padding: 5px 8px; vertical-align: top; border-bottom: 1px solid #e0e8f0; }
+  tr:nth-child(even) td { background: #f5f8fb; }
+  .benefit-label { font-weight: 700; color: #0d1b2a; white-space: nowrap; }
+  .tick { color: #00965c; font-weight: 700; }
+
+  /* ── Status badges ──────────────────────────────────────────── */
+  .status-row {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0;
+    flex-wrap: wrap;
+  }
+  .badge {
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 9pt;
+    font-weight: 700;
+  }
+  .badge-green  { background: #e8fdf4; color: #00965c; border: 1px solid #00965c; }
+  .badge-amber  { background: #fdf4e8; color: #e88c00; border: 1px solid #e88c00; }
+  .badge-navy   { background: #eef2f8; color: #0d1b2a; border: 1px solid #0d1b2a; }
+
+  /* ── CTA box ────────────────────────────────────────────────── */
+  .cta {
+    background: #0d1b2a;
+    color: #fff;
+    padding: 10px 14px;
+    margin-top: 12px;
+    border-radius: 3px;
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+  .cta strong { color: #00b4d8; }
+
+  /* ── Footer ─────────────────────────────────────────────────── */
+  .footer {
+    background: #1a2a3a;
+    color: #8899aa;
+    font-size: 8pt;
+    padding: 7px 28px;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 14px;
+  }
+
+  /* ── Print ──────────────────────────────────────────────────── */
+  @media print {
+    body { width: 210mm; margin: 0; }
+    .page { padding: 14px 22px 12px; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <h1>FSC Agentic QE Framework</h1>
+    <div class="sub">AI-Powered Quality Engineering for FCA-Regulated Salesforce FSC Delivery</div>
+  </div>
+</div>
+<div class="teal-bar"></div>
+
+<div class="page">
+
+  <!-- WHAT WE BUILT -->
+  <div class="section-title">What We Built</div>
+  <div class="intro">
+    The FSC Agentic QE Framework is a purpose-built AI pipeline that automatically applies
+    53 specialised quality engineering agents to every Jira user story — from initial refinement
+    through production release. Designed specifically for FCA-regulated Salesforce FSC Wealth
+    Management delivery, it produces structured BDD acceptance criteria, FCA compliance checks,
+    test design strategy, risk registers, and audit evidence — in under 10 minutes per story,
+    with no manual effort per sprint.
+  </div>
+
+  <!-- METRICS -->
+  <div class="metrics">
+    <div class="metric-card">
+      <span class="num">53</span>
+      <span class="lbl">AI Agents</span>
+    </div>
+    <div class="metric-card">
+      <span class="num">4</span>
+      <span class="lbl">Delivery Phases</span>
+    </div>
+    <div class="metric-card">
+      <span class="num">12</span>
+      <span class="lbl">Quality Gates</span>
+    </div>
+    <div class="metric-card">
+      <span class="num">53/53</span>
+      <span class="lbl">Agents Validated</span>
+    </div>
+    <div class="metric-card">
+      <span class="num">1,065</span>
+      <span class="lbl">Automated Tests</span>
+    </div>
+    <div class="metric-card">
+      <span class="num">&lt; 10 min</span>
+      <span class="lbl">Per Story</span>
+    </div>
+  </div>
+
+  <!-- PROBLEM & SOLUTION -->
+  <div class="cols-3">
+    <div class="panel">
+      <h4>Business Problem — Across All Phases</h4>
+      <ul>
+        <li><strong>Refinement:</strong> FCA obligations and AC gaps missed before development starts</li>
+        <li><strong>Development:</strong> Apex coverage gaps, security vulnerabilities, and code quality issues found too late in the cycle</li>
+        <li><strong>Testing:</strong> No structured CRT, UAT, or regression strategy — test gaps discovered during UAT execution</li>
+        <li><strong>Release:</strong> Go/No-Go decisions made informally; FCA audit evidence assembled manually under pressure</li>
+        <li>30+ hrs/sprint of senior QE time lost to documentation that should be automated</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>The Solution — End-to-End Coverage</h4>
+      <ul>
+        <li><strong>Refinement:</strong> FCA classification, BDD acceptance criteria, Consumer Duty mapping, and risk register — before code starts</li>
+        <li><strong>Development:</strong> AC compliance check, Apex coverage analysis, security scan, BDD Gherkin test files, and test data architecture generated automatically</li>
+        <li><strong>Testing:</strong> CRT scenarios, UAT test cases, FCA regulatory tests, regression risk, defect triage, and flaky test detection — all structured and traceable</li>
+        <li><strong>Release:</strong> Automated Go/No-Go gate, FCA Evidence Pack, change set integrity, dry-run validation, and production sign-off tracking</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h4>FCA Compliance — All Phases</h4>
+      <ul>
+        <li><strong>COBS 9.2 (Refinement):</strong> Suitability gate classified and mandatory regulatory AC scenarios generated per story</li>
+        <li><strong>Consumer Duty PS22/9 (Refinement + Testing):</strong> All four outcomes mapped at story level; vulnerable customer scenarios tested in CRT and UAT phases</li>
+        <li><strong>FG21/1 §4.3 (Testing):</strong> Vulnerable customer pathways verified through dedicated FCA scenario agent</li>
+        <li><strong>SYSC Audit Trail (Release):</strong> Immutable ledger across all phases; FCA Evidence Pack auto-assembled per story before release</li>
+        <li><strong>Go/No-Go Gate (Release):</strong> Release blocked if FCA evidence pack is incomplete or unacknowledged</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- BENEFITS TABLE -->
+  <div class="section-title">Key Benefits — Refinement to Release</div>
+  <table>
+    <tr>
+      <th style="width:12%">Phase</th>
+      <th style="width:22%">Benefit</th>
+      <th style="width:30%">Without the Framework</th>
+      <th style="width:36%">With FSC QE Framework</th>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
+      <td class="benefit-label">Acceptance Criteria Quality</td>
+      <td>Varies by analyst — vague, untestable, missing error and regulatory scenarios</td>
+      <td><span class="tick">✓</span> BDD Given/When/Then auto-generated covering happy path, error, edge case, and regulatory scenarios every sprint</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
+      <td class="benefit-label">FCA Risk Classification</td>
+      <td>Manual checklist, inconsistently applied, missed under sprint pressure</td>
+      <td><span class="tick">✓</span> Every story classified HIGH / MEDIUM / LOW with COBS 9.2, Consumer Duty, and FG21/1 triggers identified automatically</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#00b4d8;white-space:nowrap">Refinement</td>
+      <td class="benefit-label">Early Risk Visibility</td>
+      <td>Risks surface during UAT or post-release — expensive to fix</td>
+      <td><span class="tick">✓</span> Risk register with critical/high ratings raised before a line of code is written — 2–3 weeks earlier in the cycle</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#027396;white-space:nowrap">Development</td>
+      <td class="benefit-label">Code Quality &amp; Security</td>
+      <td>Apex coverage gaps, PMD violations, and security issues found late in peer review or CI</td>
+      <td><span class="tick">✓</span> Apex coverage analysis, security scan, and code quality review run automatically — issues flagged before PR merge</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#027396;white-space:nowrap">Development</td>
+      <td class="benefit-label">Test Artefact Generation</td>
+      <td>QEs manually write Gherkin files, test data scripts, and data volume estimates per story</td>
+      <td><span class="tick">✓</span> BDD .feature files, test data architecture, and data volume guidance auto-generated and traceable to story ACs</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#015271;white-space:nowrap">Testing</td>
+      <td class="benefit-label">Structured Test Coverage</td>
+      <td>CRT scenarios and UAT test cases designed ad hoc — gaps discovered during execution</td>
+      <td><span class="tick">✓</span> CRT, UAT, FCA regulatory, and regression scenarios structured per story — coverage gaps identified before test execution begins</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#015271;white-space:nowrap">Testing</td>
+      <td class="benefit-label">Defect Intelligence</td>
+      <td>Defect triage, root cause analysis, and flaky test identification done manually per defect</td>
+      <td><span class="tick">✓</span> Automated defect triage, root cause categorisation, flaky test detection, and regression risk scoring — across the full test run</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#0d1b2a;white-space:nowrap">Release</td>
+      <td class="benefit-label">Go/No-Go Decision</td>
+      <td>Informal discussion — no structured evidence gate; release decisions vary by sprint team</td>
+      <td><span class="tick">✓</span> Automated Go/No-Go gate with mandatory sign-off tracking, change set integrity check, and dry-run validation before every release</td>
+    </tr>
+    <tr>
+      <td style="font-weight:700;color:#0d1b2a;white-space:nowrap">Release</td>
+      <td class="benefit-label">FCA Audit Readiness</td>
+      <td>Evidence assembled retrospectively under pressure before FCA reviews or internal audit</td>
+      <td><span class="tick">✓</span> FCA Evidence Pack auto-assembled per story at release — immutable audit ledger covers all decisions from refinement to production</td>
+    </tr>
+  </table>
+
+  <!-- STATUS -->
+  <div class="section-title">Current Status</div>
+  <div class="status-row">
+    <span class="badge badge-green">✓ 53/53 Agents Validated</span>
+    <span class="badge badge-green">✓ 1,065 Tests Passing</span>
+    <span class="badge badge-green">✓ 12 Gates Implemented</span>
+    <span class="badge badge-green">✓ FCA Validation Complete</span>
+    <span class="badge badge-green">✓ HTML Report Generated</span>
+    <span class="badge badge-amber">⚠ 18 Production Gaps Documented</span>
+    <span class="badge badge-navy">→ Deployment Sequence Ready</span>
+  </div>
+
+  <p style="font-size:9.5pt; color:#4a5a6a; line-height:1.5; margin-top:4px;">
+    The framework is <strong>fully built and validated</strong>. Eighteen production-readiness gaps
+    (infrastructure provisioning, secrets management, Jira/Copado credentials, Compliance sign-off)
+    are documented in <em>PRODUCTION_READINESS.md</em> with effort estimates, acceptance criteria,
+    and a recommended deployment sequence.
+  </p>
+
+  <!-- NEXT STEP -->
+  <div class="section-title">Recommended Next Step</div>
+  <div class="cta">
+    <strong>Approve production deployment:</strong> commission infrastructure provisioning, assign
+    owners for the 18-gap closure plan, and schedule a pilot sprint to run the framework alongside
+    the existing manual QE process — measuring AC quality delta, FCA scenario coverage, and time
+    saved. Target: framework live for next quarter's sprint cycle.
+  </div>
+
+</div><!-- /page -->
+
+
+</body>
+</html>

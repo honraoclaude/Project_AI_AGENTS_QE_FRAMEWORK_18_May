@@ -28,6 +28,7 @@ AGENT_REGISTRY: dict[int, str] = {
     7:  "src.agents.refinement.agent_07_data_need",
     8:  "src.agents.refinement.agent_08_dependency_mapping",
     9:  "src.agents.refinement.agent_09_risk_anticipation",
+    54: "src.agents.refinement.agent_05b_ac_challenger",  # AC Challenger (adversarial, runs in Batch 3)
     # Development phase
     10: "src.agents.development.agent_10_ac_compliance",
     11: "src.agents.development.agent_11_branch_tracer",
@@ -77,6 +78,25 @@ AGENT_REGISTRY: dict[int, str] = {
     52: "src.agents.monitoring.agent_52_severity_calibration",
     53: "src.agents.monitoring.agent_53_incident_response",
 }
+
+
+def validate_registry() -> None:
+    """
+    Verify every module in AGENT_REGISTRY can be imported.
+    Call at startup so missing agents are caught before any story runs.
+    Raises ImportError with the list of broken entries.
+    """
+    failures: list[str] = []
+    for agent_id, module_path in AGENT_REGISTRY.items():
+        try:
+            importlib.import_module(module_path)
+        except ImportError as exc:
+            failures.append(f"Agent {agent_id} ({module_path}): {exc}")
+    if failures:
+        raise ImportError(
+            f"AGENT_REGISTRY has {len(failures)} unresolvable module(s):\n"
+            + "\n".join(failures)
+        )
 
 
 async def dispatch_agent(agent_id: int, state: StoryState) -> dict:

@@ -10,6 +10,8 @@ from src.agents.release.agent_44_fca_evidence_pack import (
 )
 from src.core.schemas import initial_story_state
 
+_EMPTY_STATE = initial_story_state("FSC-2417")
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 AGENT3_HIGH   = {"fca_classification": "HIGH"}
@@ -79,25 +81,25 @@ MOCK_EVIDENCE_LOW_FCA = {
 
 class TestConfidenceScoring:
     def test_fca_class_and_scenario_data_scores_well(self):
-        score, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE")
+        score, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
         assert score >= 75
 
     def test_unknown_fca_class_reduces_confidence(self):
-        score_with, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE")
-        score_without, _ = _compute_confidence(None, None, None, None, "MISSING")
+        score_with, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
+        score_without, _ = _compute_confidence(None, None, None, None, "MISSING", _EMPTY_STATE)
         assert score_with > score_without
 
     def test_complete_verdict_boosts_confidence(self):
-        score_complete, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE")
-        score_missing, _ = _compute_confidence(AGENT3_HIGH, AGENT30_GAPS, AGENT33_PASS, AGENT36_PENDING, "MISSING")
+        score_complete, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
+        score_missing, _ = _compute_confidence(AGENT3_HIGH, AGENT30_GAPS, AGENT33_PASS, AGENT36_PENDING, "MISSING", _EMPTY_STATE)
         assert score_complete > score_missing
 
     def test_score_never_exceeds_92(self):
-        score, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE")
+        score, _ = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
         assert score <= 92
 
     def test_score_never_below_20(self):
-        score, _ = _compute_confidence(None, None, None, None, "MISSING")
+        score, _ = _compute_confidence(None, None, None, None, "MISSING", _EMPTY_STATE)
         assert score >= 20
 
 

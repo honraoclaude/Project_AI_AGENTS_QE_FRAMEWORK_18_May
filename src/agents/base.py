@@ -14,11 +14,14 @@ Key patterns:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
 from src.core.config import settings
+
+if TYPE_CHECKING:
+    from src.core.schemas import StoryState
 
 # ── Shared FSC domain context (prompt cached) ─────────────────────────────────
 # This block is prepended to every agent call and marked for caching.
@@ -167,7 +170,10 @@ async def call_with_tool(
         if block.type == "tool_use" and block.name == tool_name:
             return block.input  # type: ignore[return-value]
 
-    raise RuntimeError(f"Model did not call tool '{tool_name}' — response: {response}")
+    block_types = [b.type for b in response.content]
+    raise RuntimeError(
+        f"Model did not call tool '{tool_name}' — got {len(response.content)} block(s): {block_types}"
+    )
 
 
 # ── Tier B confidence scoring ─────────────────────────────────────────────────
@@ -197,3 +203,69 @@ class TierBScorer:
 
     def build(self) -> tuple[int, dict[str, Any]]:
         return max(0, min(self._score, 100)), self._signals
+
+
+# ── Game theory utilities ─────────────────────────────────────────────────────
+
+def get_agent_result(state: StoryState, agent_id: str) -> tuple[dict | None, int]:
+    """
+    Returns (data, confidence_score) for an upstream agent.
+    confidence_score defaults to 0 if the agent has not run.
+    Allows downstream agents to weight upstream evidence by quality.
+    """
+    result = state["agent_results"].get(str(agent_id))
+    if not result:
+        return None, 0
+    return result.get("data"), result.get("confidence", {}).get("final_score", 50)
+
+
+class ShapleyAttributor:
+    """
+    Computes Shapley-value marginal contributions for upstream agents.
+
+    For an additive value function (each agent contributes independently),
+    the Shapley value equals the agent's individual contribution. We scale
+    by confidence (0-100) × data_present to give fair attribution that
+    rewards both high-quality evidence and actual data presence.
+
+    The result is normalised to sum to 100.0, making it directly comparable
+    across stories and suitable for FCA audit display.
+    """
+
+    def __init__(self) -> None:
+        self._agents: list[tuple[str, int, bool]] = []
+
+    def add_agent(self, agent_id: str, confidence: int, data_present: bool) -> None:
+        if not (0 <= confidence <= 100):
+            raise ValueError(f"confidence must be 0-100, got {confidence} for agent {agent_id}")
+        self._agents.append((agent_id, confidence, data_present))
+
+    def compute(self) -> dict[str, float]:
+        """Returns {agent_id: shapley_value} normalised to sum ≈ 100.0."""
+        raw: dict[str, float] = {
+            aid: (conf * (1.0 if present else 0.0))
+            for aid, conf, present in self._agents
+        }
+        total = sum(raw.values())
+        if total == 0.0:
+            equal = round(100.0 / len(self._agents), 2) if self._agents else 0.0
+            return {aid: equal for aid, _, _ in self._agents}
+        return {aid: round(v / total * 100.0, 2) for aid, v in raw.items()}
+
+
+_VALID_FCA_TIERS = {"HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"}
+
+def adaptive_threshold(base: int, fca_tier: str, direction: str = "strict") -> int:
+    """
+    Returns a gate threshold adjusted for FCA regulatory risk tier.
+
+    direction='strict' (default): HIGH-FCA raises the bar (harder to pass),
+    creating correct incentives — the riskiest stories face the toughest gates.
+    direction='lenient': reserved for future use where LOW-FCA can fast-track.
+
+    Adjustments: HIGH=+5, MEDIUM=0, LOW=-5, UNCLASSIFIED=+10 (unknown = cautious).
+    """
+    if fca_tier not in _VALID_FCA_TIERS:
+        raise ValueError(f"Unknown FCA tier '{fca_tier}'. Expected one of {_VALID_FCA_TIERS}")
+    adjustments = {"HIGH": +5, "MEDIUM": 0, "LOW": -5, "UNCLASSIFIED": +10}
+    return base + adjustments[fca_tier]

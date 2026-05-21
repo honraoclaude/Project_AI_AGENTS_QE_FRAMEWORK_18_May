@@ -32,9 +32,10 @@ Gates:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
+from src.agents.base import adaptive_threshold
 from src.core.schemas import StoryState
+from src.fleet_commander.phases._helpers import _get_agent_data, _merge_results
 
 
 # ── Gate definitions ──────────────────────────────────────────────────────────
@@ -55,8 +56,10 @@ def _check_gate_g2(state: StoryState) -> None:
     """
     Gate G2 — Story Integrity.
     Blocks if: AC Compliance FAIL, Coverage FAIL, or Security REVIEW_REQUIRED.
+    Coverage threshold is FCA-tier-adaptive: HIGH-FCA requires 90%, LOW-FCA allows 80%.
     """
     failures: list[str] = []
+    fca_tier = state.get("fca_classification", "UNCLASSIFIED")
 
     ac_data = _get_agent_data(state, "10")
     ac_verdict = (ac_data or {}).get("coverage_verdict") or (ac_data or {}).get("ac_compliance_verdict", "")
@@ -65,11 +68,13 @@ def _check_gate_g2(state: StoryState) -> None:
 
     cov_data = _get_agent_data(state, "12")
     cov_verdict = (cov_data or {}).get("coverage_verdict", "")
-    if cov_verdict == "FAIL":
-        coverage_pct = (cov_data or {}).get("coverage_pct", 0)
-        threshold = (cov_data or {}).get("coverage_threshold", 85)
+    coverage_pct = (cov_data or {}).get("coverage_pct", 0)
+    # Adaptive coverage threshold: HIGH-FCA=90%, MEDIUM=85%, LOW=80%, UNCLASSIFIED=95%
+    coverage_threshold = adaptive_threshold(85, fca_tier)
+    if cov_verdict == "FAIL" or (cov_data is not None and coverage_pct < coverage_threshold):
         failures.append(
-            f"Apex Coverage (Agent 12): FAIL — {coverage_pct}% below {threshold}% threshold"
+            f"Apex Coverage (Agent 12): FAIL — {coverage_pct}% below "
+            f"{coverage_threshold}% threshold (adaptive for {fca_tier}-FCA)"
         )
 
     sec_data = _get_agent_data(state, "15")
@@ -224,31 +229,3 @@ async def run_development_phase(state: StoryState) -> StoryState:
     return state
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _merge_results(
-    state: StoryState,
-    agent_ids: list[int],
-    results: list[Any],
-) -> StoryState:
-    """
-    Merge batch dispatch results into state. Failed agents (exceptions)
-    are logged but do not prevent other agents from running — gates
-    enforce the fail-closed logic.
-    """
-    for agent_id, result in zip(agent_ids, results):
-        if isinstance(result, Exception):
-            state["agent_results"][str(agent_id)] = {
-                "error": str(result),
-                "data": {},
-            }
-        else:
-            state["agent_results"][str(agent_id)] = result
-    return state
-
-
-def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:
-    result = state["agent_results"].get(agent_id)
-    if isinstance(result, dict):
-        return result.get("data") or result
-    return None

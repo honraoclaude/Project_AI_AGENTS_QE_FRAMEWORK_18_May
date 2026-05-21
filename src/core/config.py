@@ -18,7 +18,6 @@ class Settings(BaseSettings):
 
     # Model selection
     default_model: str = "claude-sonnet-4-6"
-    high_stakes_model: str = "claude-opus-4-7"
     fast_model: str = "claude-haiku-4-5-20251001"
     confidence_escalation_threshold: int = 60
 
@@ -27,6 +26,7 @@ class Settings(BaseSettings):
     jira_username: str = ""
     jira_api_token: SecretStr = SecretStr("")
     jira_project_key: str = "FSC"
+    jira_ac_field: str = "customfield_10200"
 
     # Salesforce
     sf_username: str = ""

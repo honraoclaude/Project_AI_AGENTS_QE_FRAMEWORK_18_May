@@ -16,6 +16,9 @@ from src.agents.refinement.agent_09_risk_anticipation import (
 )
 from src.core.schemas import initial_story_state
 
+# Empty state used by confidence-scoring unit tests (no agent data needed)
+_EMPTY_STATE = initial_story_state("FSC-2417")
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -163,68 +166,73 @@ MOCK_RISK_LOW = {
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
+def _conf(a3, a3_c, a4, a5, a5b, a8, extracted):
+    """Shorthand to call _compute_confidence with default empty state."""
+    return _compute_confidence(a3, a3_c, a4, a5, a5b, a8, extracted, _EMPTY_STATE)
+
+
 class TestConfidenceScoring:
     def test_ensemble_agreement_boosts_confidence(self):
-        score_agreed, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
-        score_disagreed, _ = _compute_confidence(AGENT3_DISAGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_agreed, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_disagreed, _ = _conf(AGENT3_DISAGREED, 55, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_agreed > score_disagreed
 
     def test_agent3_unavailable_reduces_confidence(self):
-        score_with, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
-        score_without, _ = _compute_confidence(None, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_with, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_without, _ = _conf(None, 0, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_with > score_without
 
     def test_agent4_available_boosts_confidence(self):
-        score_with, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
-        score_without, _ = _compute_confidence(AGENT3_AGREED, None, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_with, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_without, _ = _conf(AGENT3_AGREED, 85, None, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_with > score_without
 
     def test_cd_at_risk_boosts_confidence(self):
         """Confirmed AT_RISK verdict grounds the risk register — adds confidence."""
-        score_at_risk, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_CRITICAL)
-        score_compliant, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_CRITICAL)
+        score_at_risk, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_CRITICAL)
+        score_compliant, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_CRITICAL)
         assert score_at_risk >= score_compliant
 
     def test_deep_dependency_boosts_confidence(self):
-        score_deep, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_DEEP, MOCK_RISK_LOW)
-        score_shallow, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_deep, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_DEEP, MOCK_RISK_LOW)
+        score_shallow, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_deep > score_shallow
 
     def test_remaining_ac_gaps_reduce_confidence(self):
-        score_gaps, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_GENERATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
-        score_no_gaps, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_gaps, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_GENERATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_no_gaps, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_gaps < score_no_gaps
 
     def test_generated_from_scratch_reduces_confidence(self):
-        score_gen, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_GENERATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
-        score_val, _ = _compute_confidence(AGENT3_AGREED, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_gen, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_GENERATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_val, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
         assert score_gen < score_val
 
     def test_rich_risk_register_boosts_confidence(self):
-        score_rich, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_GENERATED, AGENT8_DEEP, MOCK_RISK_CRITICAL)
-        score_sparse, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_GENERATED, AGENT8_DEEP, MOCK_RISK_LOW)
+        score_rich, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_GENERATED, None, AGENT8_DEEP, MOCK_RISK_CRITICAL)
+        score_sparse, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_GENERATED, None, AGENT8_DEEP, MOCK_RISK_LOW)
         assert score_rich > score_sparse
 
     def test_critical_risks_present_boosts_confidence(self):
-        score_critical, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_VALIDATED, AGENT8_DEEP, MOCK_RISK_CRITICAL)
-        score_low, signals_low = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_VALIDATED, AGENT8_DEEP, MOCK_RISK_LOW)
+        score_critical, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_DEEP, MOCK_RISK_CRITICAL)
+        score_low, signals_low = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_DEEP, MOCK_RISK_LOW)
         assert score_critical > score_low
         assert "critical_risks_identified" not in signals_low
 
     def test_score_never_exceeds_92(self):
-        score, _ = _compute_confidence(AGENT3_AGREED, AGENT4_AT_RISK, AGENT5_VALIDATED, AGENT8_DEEP, MOCK_RISK_CRITICAL)
+        score, _ = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_DEEP, MOCK_RISK_CRITICAL)
         assert score <= 92
 
     def test_score_never_below_20(self):
-        score, _ = _compute_confidence(None, None, None, None, MOCK_RISK_LOW)
+        score, _ = _conf(None, 0, None, None, None, None, MOCK_RISK_LOW)
         assert score >= 20
 
     def test_ensemble_disagreement_signal_recorded(self):
-        _, signals = _compute_confidence(AGENT3_DISAGREED, None, None, None, MOCK_RISK_LOW)
+        _, signals = _conf(AGENT3_DISAGREED, 55, None, None, None, None, MOCK_RISK_LOW)
         assert "agent3_disagreed" in signals
 
     def test_agent3_unavailable_signal_recorded(self):
-        _, signals = _compute_confidence(None, None, None, None, MOCK_RISK_LOW)
+        _, signals = _conf(None, 0, None, None, None, None, MOCK_RISK_LOW)
         assert "agent3_unavailable" in signals
 
 

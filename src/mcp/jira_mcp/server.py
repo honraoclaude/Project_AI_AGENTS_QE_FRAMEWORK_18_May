@@ -67,7 +67,7 @@ async def get_acceptance_criteria(story_id: str) -> list[dict]:
     ac_clauses: list[dict] = []
 
     # Try dedicated AC custom field first (firm-specific — adjust field name as needed)
-    ac_field = getattr(fields, "customfield_10200", None)
+    ac_field = getattr(fields, settings.jira_ac_field, None)
     if ac_field:
         ac_clauses.extend(_parse_gherkin_block(ac_field, source="custom_field"))
 

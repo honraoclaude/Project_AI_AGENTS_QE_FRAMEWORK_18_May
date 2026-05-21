@@ -20,7 +20,7 @@ Purpose:
 Output data keys consumed by downstream:
   gherkin_scenarios     → list (Agent 27 CRT Execution)
   scenario_count        → int  (Agent 23 story-to-code tracer)
-  gherkin_verdict       → str  (PASS / WARN / INCOMPLETE)
+  gherkin_verdict       → str  (PASS / PARTIAL / INCOMPLETE)
   fca_coverage_present  → bool (Gate G2 — regulated stories need negative tests)
 """
 
@@ -68,10 +68,10 @@ _GHERKIN_TOOL_SCHEMA = {
         },
         "gherkin_verdict": {
             "type": "string",
-            "enum": ["PASS", "WARN", "INCOMPLETE"],
+            "enum": ["PASS", "PARTIAL", "INCOMPLETE"],
             "description": (
                 "PASS: All ACs covered with appropriate depth. "
-                "WARN: Coverage partial or boundary tests missing. "
+                "PARTIAL: Coverage partial or boundary tests missing. "
                 "INCOMPLETE: Unable to generate scenarios from available ACs."
             ),
         },
@@ -102,7 +102,7 @@ Rules:
    @boundary as appropriate.
 5. Steps must be concrete and testable — no vague language like "the system works correctly".
 6. Use data tables or Examples where multiple input variations apply.
-7. If ACs are ambiguous or missing, note the gap in coverage_gaps and set verdict WARN.
+7. If ACs are ambiguous or missing, note the gap in coverage_gaps and set verdict PARTIAL.
 8. If no ACs are available at all, set verdict INCOMPLETE.
 """.strip()
 
@@ -121,7 +121,7 @@ async def run(state: StoryState) -> AgentResult:
 
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
     ac_count = len(acs)
-    refined_ac_count = (agent5_data or {}).get("ac_count", 0)
+    refined_ac_count = (agent5_data or {}).get("ac_clause_count", 0)
     compliance_verdict = (agent10_data or {}).get("coverage_verdict", "")
     objects_in_scope = (agent13_data or {}).get("detected_objects", [])
 

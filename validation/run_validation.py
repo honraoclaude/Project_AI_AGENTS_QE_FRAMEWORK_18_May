@@ -2,7 +2,7 @@
 FSC Agentic QE Framework — Pipeline Validation Runner
 ======================================================
 
-Runs all 53 agents against a realistic sample FSC Wealth Management story.
+Runs all 54 agents against a realistic sample FSC Wealth Management story.
 Saves each agent's output as JSON, then generates an HTML report.
 
 Usage:
@@ -50,6 +50,7 @@ AGENT_META: dict[int, dict] = {
     4:  {"name": "Consumer Duty Mapper",          "phase": "Refinement",  "class": "True AI"},
     5:  {"name": "AC Generator",                 "phase": "Refinement",  "class": "True AI"},
     6:  {"name": "Test Design Strategy",         "phase": "Refinement",  "class": "True AI"},
+    54: {"name": "AC Challenger",                "phase": "Refinement",  "class": "True AI"},
     7:  {"name": "Data Need Agent",              "phase": "Refinement",  "class": "Augmented Script"},
     8:  {"name": "Dependency Mapping",           "phase": "Refinement",  "class": "Augmented Script"},
     9:  {"name": "Risk Anticipation",            "phase": "Refinement",  "class": "True AI"},
@@ -101,8 +102,8 @@ AGENT_META: dict[int, dict] = {
 
 # ── Execution batches (preserves dependency order) ────────────────────────────
 EXECUTION_PLAN: list[list[int]] = [
-    # Refinement
-    [1, 8], [2, 3, 7], [4], [5, 6], [9],
+    # Refinement (54=AC Challenger runs after Agent 5, before Agent 9)
+    [1, 8], [2, 3, 7], [4], [5], [54, 6], [9],
     # Development
     [10, 11, 13], [12, 14, 15, 16], [17, 18], [19], [20, 21], [22], [23],
     # Testing
@@ -206,11 +207,17 @@ SAMPLE_AC = [
 ]
 
 # ── Monitoring mock data ──────────────────────────────────────────────────────
+# Only 7 of 54 agents have signal rows here because Agent 52 (Severity Calibration)
+# only generates useful recommendations for agents with accumulated QE Lead feedback.
+# The 7 chosen are the agents most likely to have real override data in early operation:
+# agents 1-3 (Refinement core), 5 (AC Generator), 54 (AC Challenger), 33 (Coverage),
+# and 44 (FCA Evidence Pack). All other agents default to base=60 in _AGENT_BASE_MAP.
 MOCK_SIGNAL_ROWS = [
-    {"agent_id": 1, "total": 45, "fp": 3, "tp": 38, "fn": 2, "tn": 2},
-    {"agent_id": 2, "total": 45, "fp": 1, "tp": 42, "fn": 1, "tn": 1},
-    {"agent_id": 3, "total": 45, "fp": 2, "tp": 40, "fn": 2, "tn": 1},
-    {"agent_id": 5, "total": 38, "fp": 4, "tp": 30, "fn": 3, "tn": 1},
+    {"agent_id": 1,  "total": 45, "fp": 3, "tp": 38, "fn": 2, "tn": 2},
+    {"agent_id": 2,  "total": 45, "fp": 1, "tp": 42, "fn": 1, "tn": 1},
+    {"agent_id": 3,  "total": 45, "fp": 2, "tp": 40, "fn": 2, "tn": 1},
+    {"agent_id": 5,  "total": 38, "fp": 4, "tp": 30, "fn": 3, "tn": 1},
+    {"agent_id": 54, "total": 15, "fp": 1, "tp": 12, "fn": 1, "tn": 1},  # AC Challenger
     {"agent_id": 33, "total": 52, "fp": 0, "tp": 50, "fn": 1, "tn": 1},
     {"agent_id": 44, "total": 30, "fp": 1, "tp": 27, "fn": 1, "tn": 1},
 ]
@@ -296,7 +303,7 @@ async def run_agent(agent_id: int, state: dict, patches: list) -> dict:
 
 
 async def run_all(story_id: str, output_dir: Path) -> list[dict]:
-    """Run all 53 agents in dependency order. Returns list of result dicts."""
+    """Run all 54 agents in dependency order. Returns list of result dicts."""
     state = initial_story_state(story_id)
     all_results = []
     patches = _build_patches()
@@ -574,13 +581,14 @@ def _module_path(agent_id: int) -> str:
         51: "agent_51_health",
         52: "agent_52_severity_calibration",
         53: "agent_53_incident_response",
+        54: "agent_05b_ac_challenger",
     }
     return f"src.agents.{pkg}.{overrides[agent_id]}"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(story_id: str, skip_report: bool) -> None:
+async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> None:
     t_start = time.monotonic()
     output_dir = OUTPUT_DIR
 
@@ -605,10 +613,16 @@ async def main(story_id: str, skip_report: bool) -> None:
         generate_html_report(output_dir / story_id, report_path, story_id)
         print(f"  Report: {report_path}\n")
 
+    if dashboard:
+        from validation.generate_dashboard import generate as gen_dashboard
+        gen_dashboard(output_dir)
+        print()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--story", default="FSC-2417")
     parser.add_argument("--skip-report", action="store_true")
+    parser.add_argument("--dashboard", action="store_true")
     args = parser.parse_args()
-    asyncio.run(main(args.story, args.skip_report))
+    asyncio.run(main(args.story, args.skip_report, args.dashboard))

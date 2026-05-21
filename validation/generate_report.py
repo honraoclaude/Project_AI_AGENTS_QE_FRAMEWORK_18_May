@@ -65,6 +65,19 @@ def _derive_verdict(result: dict) -> str:
     if result.get("status") == "error":
         return "ERROR"
     data = result.get("data", {})
+
+    # Agent 05B (AC Challenger) — derive verdict from adversarial challenge outcome
+    if result.get("agent_id") == 54:
+        critical = data.get("critical_weakness_count", 0)
+        ac_count = data.get("ac_count_challenged", 0)
+        if ac_count == 0:
+            return "SKIPPED"
+        if critical == 0:
+            return "PASS"
+        if critical <= 2:
+            return "WARN"
+        return "FAIL"
+
     for key in [
         "retrospective_verdict", "calibration_verdict", "incident_verdict",
         "monitor_verdict", "rollback_verdict", "prod_verdict",
@@ -90,6 +103,8 @@ def _key_outputs(result: dict) -> list[tuple[str, str]]:
         "goal", "persona", "fsc_objects", "fca_classification",
         "invest_score", "invest_verdict", "dimension_scores",
         "ac_count", "ac_clauses",
+        # Agent 05B (AC Challenger) game theory keys
+        "ac_count_challenged", "survivor_count", "critical_weakness_count", "challenge_summary",
         "risk_level", "risk_rating", "risk_factors",
         "coverage_verdict", "overall_coverage_pct", "gherkin_scenario_count",
         "defect_count", "critical_defects", "defect_verdict",
@@ -745,7 +760,7 @@ a {{ color: #3182ce; text-decoration: none; }}
     <span class="meta-pill">Generated: <strong>{gen_str}</strong></span>
     <span class="meta-pill">FCA Classification: <strong>{_escape(str(fca))}</strong></span>
     <span class="meta-pill">Duration: <strong>{elapsed_str}</strong></span>
-    <span class="meta-pill">Framework: <strong>PACT Edition v1</strong></span>
+    <span class="meta-pill">Framework: <strong>PACT Edition v1 + Game Theory</strong></span>
   </div>
 </header>
 

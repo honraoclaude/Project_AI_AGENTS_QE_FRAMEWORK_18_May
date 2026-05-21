@@ -2,7 +2,7 @@
 FSC Agentic QE Framework — Pipeline Validation Runner
 ======================================================
 
-Runs all 53 agents against a realistic sample FSC Wealth Management story.
+Runs all 54 agents against a realistic sample FSC Wealth Management story.
 Saves each agent's output as JSON, then generates an HTML report.
 
 Usage:
@@ -208,10 +208,11 @@ SAMPLE_AC = [
 
 # ── Monitoring mock data ──────────────────────────────────────────────────────
 MOCK_SIGNAL_ROWS = [
-    {"agent_id": 1, "total": 45, "fp": 3, "tp": 38, "fn": 2, "tn": 2},
-    {"agent_id": 2, "total": 45, "fp": 1, "tp": 42, "fn": 1, "tn": 1},
-    {"agent_id": 3, "total": 45, "fp": 2, "tp": 40, "fn": 2, "tn": 1},
-    {"agent_id": 5, "total": 38, "fp": 4, "tp": 30, "fn": 3, "tn": 1},
+    {"agent_id": 1,  "total": 45, "fp": 3, "tp": 38, "fn": 2, "tn": 2},
+    {"agent_id": 2,  "total": 45, "fp": 1, "tp": 42, "fn": 1, "tn": 1},
+    {"agent_id": 3,  "total": 45, "fp": 2, "tp": 40, "fn": 2, "tn": 1},
+    {"agent_id": 5,  "total": 38, "fp": 4, "tp": 30, "fn": 3, "tn": 1},
+    {"agent_id": 54, "total": 15, "fp": 1, "tp": 12, "fn": 1, "tn": 1},  # AC Challenger
     {"agent_id": 33, "total": 52, "fp": 0, "tp": 50, "fn": 1, "tn": 1},
     {"agent_id": 44, "total": 30, "fp": 1, "tp": 27, "fn": 1, "tn": 1},
 ]
@@ -297,7 +298,7 @@ async def run_agent(agent_id: int, state: dict, patches: list) -> dict:
 
 
 async def run_all(story_id: str, output_dir: Path) -> list[dict]:
-    """Run all 53 agents in dependency order. Returns list of result dicts."""
+    """Run all 54 agents in dependency order. Returns list of result dicts."""
     state = initial_story_state(story_id)
     all_results = []
     patches = _build_patches()
@@ -575,6 +576,7 @@ def _module_path(agent_id: int) -> str:
         51: "agent_51_health",
         52: "agent_52_severity_calibration",
         53: "agent_53_incident_response",
+        54: "agent_05b_ac_challenger",
     }
     return f"src.agents.{pkg}.{overrides[agent_id]}"
 

@@ -390,3 +390,81 @@ class TestAgentRun:
 
         assert len(result.data["fca_triggers"]) > 0
         assert "Suitability__c" in result.data["fca_triggers"]
+
+
+# ── Transactional Analysis integration tests ──────────────────────────────────
+
+@pytest.mark.asyncio
+class TestTAPosition:
+    def test_agreement_produces_ok_ok_ta_position(self):
+        _, _, signals = _resolve_ensemble(MOCK_HIGH, MOCK_HIGH)
+        assert signals["ta_position"] == "OK_OK"
+        assert signals["interaction_mode"] == "COLLABORATE"
+
+    def test_disagreement_produces_non_ok_ok_ta_position(self):
+        """HIGH (conf 85) vs UNCLASSIFIED (conf 55 < 60) → OK_NOT_OK."""
+        unclassified = {**MOCK_LOW, "fca_classification": "UNCLASSIFIED"}
+        _, _, signals = _resolve_ensemble(MOCK_HIGH, unclassified)
+        assert signals["ta_position"] != "OK_OK"
+
+    def test_signals_dict_includes_ta_keys(self):
+        _, _, signals = _resolve_ensemble(MOCK_HIGH, MOCK_MEDIUM)
+        assert "ta_position" in signals
+        assert "interaction_mode" in signals
+
+    def test_low_vs_low_agreement_ok_ok(self):
+        _, _, signals = _resolve_ensemble(MOCK_LOW, MOCK_LOW)
+        assert signals["ta_position"] == "OK_OK"
+
+    def test_disagreement_has_ta_rationale(self):
+        _, _, signals = _resolve_ensemble(MOCK_HIGH, MOCK_MEDIUM)
+        assert "ta_rationale" in signals
+
+    async def test_ta_position_in_result_data_on_agreement(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES
+            mock_llm.return_value = MOCK_HIGH
+            result = await run(state)
+
+        assert "ta_position" in result.data
+        assert "interaction_mode" in result.data
+        assert result.data["ta_position"] == "OK_OK"
+        assert result.data["interaction_mode"] == "COLLABORATE"
+
+    async def test_ta_position_in_result_data_on_disagreement(self):
+        """HIGH (conf 85) vs UNCLASSIFIED (conf 55 < 60) → OK_NOT_OK → ta_position != OK_OK."""
+        state = initial_story_state("FSC-2417")
+        unclassified = {**MOCK_LOW, "fca_classification": "UNCLASSIFIED"}
+
+        call_count = 0
+
+        async def alternating_llm(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return MOCK_HIGH if call_count % 2 == 1 else unclassified
+
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool",
+                  side_effect=alternating_llm),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES
+            result = await run(state)
+
+        assert result.data["ta_position"] != "OK_OK"
+        assert result.data["ensemble_agreement"] is False

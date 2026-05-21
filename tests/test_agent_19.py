@@ -238,3 +238,76 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+
+# ── Shapley attribution tests ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestShapleyAttribution:
+    async def test_shapley_attribution_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["5"] = {"data": AGENT5_DATA}
+        state["agent_results"]["13"] = {"data": AGENT13_DATA}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert "shapley_attribution" in result.data
+        shapley = result.data["shapley_attribution"]
+        assert isinstance(shapley, dict)
+        assert len(shapley) == 3
+
+    async def test_shapley_attribution_sums_to_100(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["5"] = {"data": AGENT5_DATA}
+        state["agent_results"]["13"] = {"data": AGENT13_DATA}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        shapley = result.data["shapley_attribution"]
+        total = sum(shapley.values())
+        assert abs(total - 100.0) < 0.01
+
+    async def test_ac_source_trust_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["5"] = {"data": {**AGENT5_DATA, "generation_mode_trust": 0.6}}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert "ac_source_trust" in result.data
+        assert result.data["ac_source_trust"] == 0.6

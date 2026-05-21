@@ -130,6 +130,13 @@ async def run(state: StoryState) -> AgentResult:
     complete     = result_data.get("triage_complete", True)
     narrative    = result_data.get("narrative", "Defect Triage Agent completed assessment.")
 
+    # Coalition severity voting — 5 independent test sources each vote on severity
+    severity_votes = _build_severity_votes(
+        agent27_data, agent28_data, agent30_data, agent31_data, agent37_data,
+    )
+    final_severity, minimax_escalated = _resolve_severity_votes(severity_votes)
+    coalition_dissent = [src for src, sev in severity_votes.items() if sev != final_severity]
+
     confidence_score, signals = _compute_confidence(
         agent27_data, agent28_data, agent31_data, agent37_data, defect_count,
     )
@@ -147,6 +154,10 @@ async def run(state: StoryState) -> AgentResult:
         "defect_verdict": verdict,
         "triage_complete": complete,
         "narrative": narrative,
+        "severity_votes": severity_votes,
+        "coalition_severity": final_severity,
+        "minimax_escalated": minimax_escalated,
+        "coalition_dissent": coalition_dissent,
         "signals": signals,
     }
 
@@ -216,6 +227,58 @@ async def _run_triage(user_message: str) -> dict:
         tool_schema=_TRIAGE_TOOL_SCHEMA,
         max_tokens=800,
     )
+
+
+def _infer_severity(verdict: str, count: int | bool) -> str:
+    if verdict == "FAIL" and count:
+        return "P1"
+    if verdict == "WARN" and count:
+        return "P2"
+    if verdict == "FAIL":
+        return "P2"
+    return "P3"
+
+
+def _build_severity_votes(
+    agent27_data: dict | None,
+    agent28_data: dict | None,
+    agent30_data: dict | None,
+    agent31_data: dict | None,
+    agent37_data: dict | None,
+) -> dict[str, str]:
+    return {
+        "crt":          _infer_severity(
+            (agent27_data or {}).get("crt_execution_verdict", "PASS"),
+            (agent27_data or {}).get("crt_fail_count", 0),
+        ),
+        "fca_scenario": _infer_severity(
+            (agent30_data or {}).get("fca_scenario_verdict", "PASS"),
+            len((agent30_data or {}).get("regulatory_gaps", [])),
+        ),
+        "financial":    _infer_severity(
+            (agent31_data or {}).get("integrity_verdict", "PASS"),
+            len((agent31_data or {}).get("integrity_violations", [])),
+        ),
+        "performance":  _infer_severity(
+            (agent37_data or {}).get("perf_test_verdict", "PASS"),
+            bool((agent37_data or {}).get("performance_concern", "none") not in ("none", "")),
+        ),
+        "self_heal":    _infer_severity(
+            (agent28_data or {}).get("self_heal_verdict", "PASS"),
+            len((agent28_data or {}).get("suspect_self_heals", [])),
+        ),
+    }
+
+
+def _resolve_severity_votes(votes: dict[str, str]) -> tuple[str, bool]:
+    """Returns (final_severity, minimax_escalated). Any P1 → escalate regardless."""
+    from collections import Counter
+    if "P1" in votes.values():
+        majority = "P1"
+        escalated = not all(v == "P1" for v in votes.values())
+        return majority, escalated
+    majority = Counter(votes.values()).most_common(1)[0][0]
+    return majority, False
 
 
 def _build_triage_message(

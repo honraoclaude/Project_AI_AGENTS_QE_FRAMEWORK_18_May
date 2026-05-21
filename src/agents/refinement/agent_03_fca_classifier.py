@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import asyncio
 
-from src.agents.base import build_system, call_with_tool
+from src.agents.base import build_system, call_with_tool, classify_ta_interaction
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_acceptance_criteria, get_story
@@ -237,6 +237,8 @@ async def run(state: StoryState) -> AgentResult:
         "call_a_classification": call_a_result["fca_classification"],
         "call_b_classification": call_b_result["fca_classification"],
         "tier_gap": signals.get("tier_gap", 0),
+        "ta_position": signals.get("ta_position", "OK_OK"),
+        "interaction_mode": signals.get("interaction_mode", "COLLABORATE"),
         "signals": signals,
     }
 
@@ -278,6 +280,8 @@ def _resolve_ensemble(
             "call_a": class_a,
             "call_b": class_b,
             "tier_gap": 0,
+            "ta_position": "OK_OK",
+            "interaction_mode": "COLLABORATE",
         }
 
     tier_a = _TIER_ORDER[class_a]
@@ -296,12 +300,23 @@ def _resolve_ensemble(
     # Graduated confidence: adjacent tier gap is more reliable than a 2-tier jump
     confidence = 48 if tier_gap == 1 else (38 if tier_gap == 2 else 30)
 
+    conf_a = _AGREEMENT_CONFIDENCE[class_a]
+    conf_b = _AGREEMENT_CONFIDENCE[class_b]
+    ta_pos, mode = classify_ta_interaction(conf_a, conf_b)
+
     return winner, confidence, {
         "ensemble_agreement": False,
         "call_a": class_a,
         "call_b": class_b,
         "tier_gap": tier_gap,
         "conservative_winner": winner,
+        "ta_position": ta_pos,
+        "interaction_mode": mode,
+        "ta_rationale": (
+            f"TA {ta_pos} → {mode}. "
+            f"Call A ({class_a}) vs Call B ({class_b}) disagreed. "
+            f"Conservative winner ({winner}) applied per safer-call-wins rule."
+        ),
     }
 
 

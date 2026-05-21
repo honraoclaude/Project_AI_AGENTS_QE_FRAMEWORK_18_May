@@ -210,3 +210,91 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+
+# ── Ensemble and TA integration tests ────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestEnsembleAndTA:
+    async def test_ensemble_agreement_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_14_code_quality.get_pmd_results",
+                  new_callable=AsyncMock) as mock_pmd,
+            patch("src.agents.development.agent_14_code_quality.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_pmd.return_value = PMD_CLEAN
+            mock_llm.return_value = MOCK_RESULT_PASS
+            result = await run(state)
+
+        assert "ensemble_agreement" in result.data
+
+    async def test_ta_position_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_14_code_quality.get_pmd_results",
+                  new_callable=AsyncMock) as mock_pmd,
+            patch("src.agents.development.agent_14_code_quality.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_pmd.return_value = PMD_CLEAN
+            mock_llm.return_value = MOCK_RESULT_PASS
+            result = await run(state)
+
+        assert "ta_position" in result.data
+        assert "interaction_mode" in result.data
+        assert result.data["ta_position"] in ("OK_OK", "OK_NOT_OK", "NOT_OK_OK", "NOT_OK_NOT_OK")
+
+    async def test_call_a_and_call_b_verdicts_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_14_code_quality.get_pmd_results",
+                  new_callable=AsyncMock) as mock_pmd,
+            patch("src.agents.development.agent_14_code_quality.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_pmd.return_value = PMD_CLEAN
+            mock_llm.return_value = MOCK_RESULT_PASS
+            result = await run(state)
+
+        assert "call_a_verdict" in result.data
+        assert "call_b_verdict" in result.data
+        assert result.data["call_a_verdict"] in ("PASS", "WARN", "FAIL")
+
+    async def test_clean_pmd_produces_pass_call_a_verdict(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_14_code_quality.get_pmd_results",
+                  new_callable=AsyncMock) as mock_pmd,
+            patch("src.agents.development.agent_14_code_quality.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_pmd.return_value = PMD_CLEAN
+            mock_llm.return_value = MOCK_RESULT_PASS
+            result = await run(state)
+
+        assert result.data["call_a_verdict"] == "PASS"
+
+    async def test_critical_violations_produce_fail_call_a_verdict(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_14_code_quality.get_pmd_results",
+                  new_callable=AsyncMock) as mock_pmd,
+            patch("src.agents.development.agent_14_code_quality.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_pmd.return_value = PMD_CRITICAL
+            mock_llm.return_value = MOCK_RESULT_FAIL
+            result = await run(state)
+
+        assert result.data["call_a_verdict"] == "FAIL"

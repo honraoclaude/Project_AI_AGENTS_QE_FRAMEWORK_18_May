@@ -199,3 +199,61 @@ class TestAgentRun:
 
         assert result.agent_id == 44
         assert result.data["evidence_verdict"] in ("COMPLETE", "PARTIAL", "MISSING")
+
+
+# ── TA-enhanced Shapley tests ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestTAEnhancedShapley:
+    async def test_ta_evidence_summary_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"]  = {"data": AGENT3_HIGH}
+        state["agent_results"]["4"]  = {"data": AGENT4_PASS}
+        state["agent_results"]["30"] = {"data": AGENT30_FULL}
+        state["agent_results"]["33"] = {"data": AGENT33_PASS}
+        state["agent_results"]["36"] = {"data": AGENT36_SIGNED_OFF}
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        assert "ta_evidence_summary" in result.data
+
+    async def test_ta_evidence_summary_has_all_agent_ids(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        summary = result.data["ta_evidence_summary"]
+        for agent_id in ["3", "4", "30", "33", "36"]:
+            assert agent_id in summary
+
+    async def test_ta_evidence_summary_values_are_ok_or_not_ok(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        for val in result.data["ta_evidence_summary"].values():
+            assert val in ("OK", "NOT_OK")
+
+    async def test_ta_evidence_ok_when_high_confidence_upstream(self):
+        state = initial_story_state("FSC-2417")
+        # Set agent_results with confidence >= 60 so _ta_mult returns 1.0 (OK)
+        state["agent_results"]["3"] = {
+            "data": AGENT3_HIGH,
+            "confidence": {"final_score": 80},
+        }
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        assert result.data["ta_evidence_summary"]["3"] == "OK"

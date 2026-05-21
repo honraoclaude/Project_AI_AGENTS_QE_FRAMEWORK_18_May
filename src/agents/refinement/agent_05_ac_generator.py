@@ -288,6 +288,11 @@ async def run(state: StoryState) -> AgentResult:
         "ac_clause_count": len(ac_clauses),
         "fca_relevant_clause_count": fca_clause_count,
         "generation_mode": generation_mode,
+        "generation_mode_trust": {
+            "validated_existing": 1.0,
+            "supplemented_existing": 0.8,
+            "generated_from_scratch": 0.6,
+        }.get(generation_mode, 0.8),
         "coverage_assessment": coverage,
         "gaps_filled": extracted.get("gaps_filled", []),
         "remaining_gaps": extracted.get("remaining_gaps", []),

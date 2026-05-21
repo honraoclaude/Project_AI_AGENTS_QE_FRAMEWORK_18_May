@@ -38,6 +38,9 @@ ActionType = Literal["SIGNOFF", "WAIVER", "GONOGO"]
 
 ApproverRole = Literal["CO", "PO", "BUSINESS", "QE_LEAD", "TECH_LEAD"]
 
+TAPosition = Literal["OK_OK", "OK_NOT_OK", "NOT_OK_OK", "NOT_OK_NOT_OK"]
+InteractionMode = Literal["COLLABORATE", "ASSERT", "DEFER", "ESCALATE"]
+
 
 # ── Core explainability trace ─────────────────────────────────────────────────
 
@@ -104,6 +107,8 @@ class ConflictResolution(BaseModel):
     reason: str
     winning_agent_id: Optional[int] = None
     resolved_at: datetime = Field(default_factory=datetime.utcnow)
+    ta_position: str = "OK_OK"
+    interaction_mode: str = "COLLABORATE"
 
 
 # ── LangGraph story state ─────────────────────────────────────────────────────

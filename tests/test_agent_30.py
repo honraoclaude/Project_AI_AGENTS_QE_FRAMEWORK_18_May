@@ -225,3 +225,78 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+
+# ── Ensemble and TA integration tests ────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestEnsembleAndTA:
+    async def test_ensemble_agreement_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert "ensemble_agreement" in result.data
+        assert isinstance(result.data["ensemble_agreement"], bool)
+
+    async def test_ta_position_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert "ta_position" in result.data
+        assert "interaction_mode" in result.data
+        assert result.data["ta_position"] in ("OK_OK", "OK_NOT_OK", "NOT_OK_OK", "NOT_OK_NOT_OK")
+
+    async def test_call_scenario_counts_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert "call_a_scenario_count" in result.data
+        assert "call_b_scenario_count" in result.data
+        assert isinstance(result.data["call_a_scenario_count"], int)
+        assert isinstance(result.data["call_b_scenario_count"], int)
+
+    async def test_both_calls_same_mock_agreement_true(self):
+        """When both LLM calls return the same mock, ensemble_agreement should be True."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert result.data["ensemble_agreement"] is True

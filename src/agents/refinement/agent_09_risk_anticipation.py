@@ -39,7 +39,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import ShapleyAttributor, TierBScorer, build_system, call_with_tool, get_agent_result
+from src.agents.base import ShapleyAttributor, TierBScorer, build_system, call_with_tool, classify_ta_interaction, get_agent_result, _ta_mult
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_story
@@ -261,6 +261,11 @@ async def run(state: StoryState) -> AgentResult:
         "recommended_actions": extracted.get("recommended_actions", []),
         "fca_classification_context": fca_class,
         "upstream_agents_available": _count_available_agents(state),
+        "ta_interaction_summary": {
+            aid: ("OK" if state["agent_results"].get(aid, {}).get(
+                  "confidence", {}).get("final_score", 0) >= 60 else "NOT_OK")
+            for aid in ["1", "2", "3", "4", "5", "54", "6", "8"]
+        },
         "signals": signals,
     }
 
@@ -303,7 +308,9 @@ def _compute_confidence(
             weighted_bonus = round(8 * (agent3_conf / 100))
             scorer.add("agent3_agreed_weighted", agent3_conf, +weighted_bonus)
         else:
-            scorer.add("agent3_disagreed", True, -5)
+            ta_pos = agent3_data.get("ta_position", "NOT_OK_NOT_OK")
+            _TA_PENALTY = {"OK_OK": -3, "OK_NOT_OK": -5, "NOT_OK_OK": -5, "NOT_OK_NOT_OK": -12}
+            scorer.add("agent3_disagreed_ta", ta_pos, _TA_PENALTY.get(ta_pos, -5))
     else:
         scorer.add("agent3_unavailable", True, -8)
 
@@ -353,16 +360,23 @@ def _compute_confidence(
             scorer.add("ac_challenge_failed", critical_weaknesses, -10)
         scorer.add("ac_survivor_count", survivor_count, 0)  # informational
 
-    # Shapley attribution: fair credit for each upstream agent's contribution
+    # Shapley attribution: fair credit with TA trust multiplier per agent
     attributor = ShapleyAttributor()
-    attributor.add_agent("1", state["agent_results"].get("1", {}).get("confidence", {}).get("final_score", 0), "1" in state["agent_results"])
-    attributor.add_agent("2", state["agent_results"].get("2", {}).get("confidence", {}).get("final_score", 0), "2" in state["agent_results"])
-    attributor.add_agent("3", agent3_conf, agent3_data is not None)
-    attributor.add_agent("4", state["agent_results"].get("4", {}).get("confidence", {}).get("final_score", 0), agent4_data is not None)
-    attributor.add_agent("5", state["agent_results"].get("5", {}).get("confidence", {}).get("final_score", 0), agent5_data is not None)
-    attributor.add_agent("5b", state["agent_results"].get("54", {}).get("confidence", {}).get("final_score", 0), agent5b_data is not None)
-    attributor.add_agent("6", state["agent_results"].get("6", {}).get("confidence", {}).get("final_score", 0), "6" in state["agent_results"])
-    attributor.add_agent("8", state["agent_results"].get("8", {}).get("confidence", {}).get("final_score", 0), agent8_data is not None)
+    c1  = state["agent_results"].get("1",  {}).get("confidence", {}).get("final_score", 0)
+    c2  = state["agent_results"].get("2",  {}).get("confidence", {}).get("final_score", 0)
+    c4  = state["agent_results"].get("4",  {}).get("confidence", {}).get("final_score", 0)
+    c5  = state["agent_results"].get("5",  {}).get("confidence", {}).get("final_score", 0)
+    c5b = state["agent_results"].get("54", {}).get("confidence", {}).get("final_score", 0)
+    c6  = state["agent_results"].get("6",  {}).get("confidence", {}).get("final_score", 0)
+    c8  = state["agent_results"].get("8",  {}).get("confidence", {}).get("final_score", 0)
+    attributor.add_agent("1",  c1,         "1" in state["agent_results"], _ta_mult(c1))
+    attributor.add_agent("2",  c2,         "2" in state["agent_results"], _ta_mult(c2))
+    attributor.add_agent("3",  agent3_conf, agent3_data is not None,      _ta_mult(agent3_conf))
+    attributor.add_agent("4",  c4,         agent4_data is not None,       _ta_mult(c4))
+    attributor.add_agent("5",  c5,         agent5_data is not None,       _ta_mult(c5))
+    attributor.add_agent("5b", c5b,        agent5b_data is not None,      _ta_mult(c5b))
+    attributor.add_agent("6",  c6,         "6" in state["agent_results"], _ta_mult(c6))
+    attributor.add_agent("8",  c8,         agent8_data is not None,       _ta_mult(c8))
     scorer.add("shapley_attributions", attributor.compute(), 0)  # informational — no score delta
 
     scorer.cap(92).floor(20)

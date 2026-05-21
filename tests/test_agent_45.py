@@ -51,7 +51,7 @@ MOCK_CONDITIONAL = {
 
 class TestMakeDecision:
     def test_all_clear_gives_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is True
@@ -59,7 +59,7 @@ class TestMakeDecision:
         assert len(reasons) == 0
 
     def test_readiness_blocked_gives_no_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_BLOCKED, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is False
@@ -67,7 +67,7 @@ class TestMakeDecision:
         assert any("readiness" in r.lower() for r in reasons)
 
     def test_integrity_fail_gives_no_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_FAIL, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is False
@@ -75,15 +75,14 @@ class TestMakeDecision:
         assert any("integrity" in r.lower() for r in reasons)
 
     def test_integrity_warn_does_not_block(self):
-        # WARN integrity = still valid, should not block
-        go, _, verdict = _make_decision(
+        go, _, verdict, _, _, _ = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_WARN, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is True
         assert verdict == "GO"
 
     def test_smoke_fail_gives_no_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_FAIL, AGENT44_COMPLETE,
         )
         assert go is False
@@ -91,50 +90,109 @@ class TestMakeDecision:
         assert any("smoke" in r.lower() for r in reasons)
 
     def test_smoke_skipped_does_not_block(self):
-        # SKIPPED smoke = not a failure
-        go, _, verdict = _make_decision(
+        go, _, verdict, _, _, _ = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_SKIPPED, AGENT44_COMPLETE,
         )
         assert go is True
 
     def test_fca_evidence_missing_gives_no_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_MISSING,
         )
         assert go is False
         assert any("evidence" in r.lower() for r in reasons)
 
     def test_fca_evidence_partial_does_not_block(self):
-        # PARTIAL is not MISSING — should not block
-        go, _, _ = _make_decision(
+        go, _, _, _, _, _ = _make_decision(
             AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_PARTIAL,
         )
         assert go is True
 
     def test_uat_pending_gives_conditional(self):
-        go, _, verdict = _make_decision(
+        go, _, verdict, _, _, _ = _make_decision(
             AGENT36_PENDING, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is True
         assert verdict == "CONDITIONAL"
 
     def test_uat_blocked_gives_no_go(self):
-        go, reasons, verdict = _make_decision(
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
             AGENT36_BLOCKED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
         )
         assert go is False
         assert verdict == "NO_GO"
 
     def test_no_upstream_data_gives_go(self):
-        go, _, verdict = _make_decision(None, None, None, None, None)
+        go, _, verdict, _, _, _ = _make_decision(None, None, None, None, None)
         assert go is True
         assert verdict == "GO"
 
     def test_multiple_failures_all_collected(self):
-        _, reasons, _ = _make_decision(
+        _, reasons, _, _, _, _ = _make_decision(
             AGENT36_BLOCKED, AGENT39_BLOCKED, AGENT41_FAIL, AGENT43_FAIL, AGENT44_MISSING,
         )
         assert len(reasons) >= 4
+
+
+# ── Minimax loss analysis + coalition tests ───────────────────────────────────
+
+class TestMinimaxAndCoalition:
+    def test_all_clear_no_minimax_loss(self):
+        go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert minimax_loss == []
+        assert go is True
+
+    def test_smoke_fail_produces_minimax_loss_entry(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_FAIL, AGENT44_COMPLETE,
+        )
+        assert len(minimax_loss) >= 1
+        loss_types = [m["loss_type"] for m in minimax_loss]
+        assert "PRODUCTION_INCIDENT" in loss_types
+
+    def test_fca_evidence_missing_maps_to_regulatory_breach(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_MISSING,
+        )
+        loss_types = [m["loss_type"] for m in minimax_loss]
+        assert "REGULATORY_BREACH" in loss_types
+
+    def test_all_clear_unanimous_go(self):
+        _, _, _, _, coalition_verdict, coalition_dissent = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert coalition_verdict == "UNANIMOUS_GO"
+        assert coalition_dissent == []
+
+    def test_smoke_fail_produces_dissent_no_go(self):
+        _, _, _, _, coalition_verdict, coalition_dissent = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_PASS, AGENT43_FAIL, AGENT44_COMPLETE,
+        )
+        assert coalition_verdict == "DISSENT_NO_GO"
+        assert "smoke" in coalition_dissent
+
+    def test_minimax_loss_entry_has_required_keys(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            AGENT36_NOT_REQUIRED, AGENT39_BLOCKED, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        for entry in minimax_loss:
+            assert "gate" in entry
+            assert "loss_type" in entry
+            assert "severity" in entry
+
+    def test_multiple_failures_produce_multiple_loss_entries(self):
+        _, reasons, _, minimax_loss, _, _ = _make_decision(
+            AGENT36_BLOCKED, AGENT39_BLOCKED, AGENT41_FAIL, AGENT43_FAIL, AGENT44_MISSING,
+        )
+        assert len(minimax_loss) == len(reasons)
+
+    def test_uat_pending_still_unanimous_go(self):
+        _, _, _, _, coalition_verdict, _ = _make_decision(
+            AGENT36_PENDING, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert coalition_verdict == "UNANIMOUS_GO"
 
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
@@ -192,7 +250,8 @@ class TestAgentRun:
             mock_haiku.return_value = MOCK_GO
             result = await run(state)
 
-        for key in ["go_decision", "no_go_reasons", "coordinator_verdict"]:
+        for key in ["go_decision", "no_go_reasons", "coordinator_verdict",
+                    "minimax_loss_analysis", "coalition_verdict", "coalition_dissent"]:
             assert key in result.data
 
     async def test_go_when_all_gates_clear(self):
@@ -247,3 +306,32 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_go_produces_unanimous_coalition_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["39"] = {"data": AGENT39_READY}
+        state["agent_results"]["41"] = {"data": AGENT41_PASS}
+        state["agent_results"]["43"] = {"data": AGENT43_PASS}
+        state["agent_results"]["44"] = {"data": AGENT44_COMPLETE}
+        state["agent_results"]["36"] = {"data": AGENT36_NOT_REQUIRED}
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_GO
+            result = await run(state)
+
+        assert result.data["coalition_verdict"] == "UNANIMOUS_GO"
+        assert result.data["coalition_dissent"] == []
+        assert result.data["minimax_loss_analysis"] == []
+
+    async def test_no_go_produces_dissent_and_loss_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["43"] = {"data": AGENT43_FAIL}
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_NO_GO
+            result = await run(state)
+
+        assert result.data["coalition_verdict"] == "DISSENT_NO_GO"
+        assert len(result.data["minimax_loss_analysis"]) >= 1

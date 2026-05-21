@@ -26,7 +26,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import TierBScorer, build_system, call_with_tool
+from src.agents.base import ShapleyAttributor, TierBScorer, _ta_mult, build_system, call_with_tool, get_agent_result
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_acceptance_criteria, get_story
@@ -111,10 +111,10 @@ Rules:
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
-    agent3_data = _get_agent_data(state, "3")
-    agent5_data = _get_agent_data(state, "5")
+    agent3_data, agent3_conf = get_agent_result(state, "3")
+    agent5_data, agent5_conf = get_agent_result(state, "5")
     agent10_data = _get_agent_data(state, "10")
-    agent13_data = _get_agent_data(state, "13")
+    agent13_data, agent13_conf = get_agent_result(state, "13")
 
     story = await get_story(story_id)
     acs = await get_acceptance_criteria(story_id)
@@ -151,6 +151,15 @@ async def run(state: StoryState) -> AgentResult:
     fca_coverage = result.get("fca_coverage_present", False)
     gaps = result.get("coverage_gaps", [])
 
+    # Coalition Shapley: 3 sources contribute to scenario generation
+    agent5_trust = (agent5_data or {}).get("generation_mode_trust", 0.8)
+    agent5_shapley_mult = 1.0 if agent5_trust >= 0.8 else 0.5
+    attributor = ShapleyAttributor()
+    attributor.add_agent("5_ac_clauses", agent5_conf,  ac_count > 0,                  agent5_shapley_mult)
+    attributor.add_agent("3_fca_class",  agent3_conf,  agent3_data is not None,       _ta_mult(agent3_conf))
+    attributor.add_agent("13_metadata",  agent13_conf, bool((agent13_data or {}).get("detected_objects")), _ta_mult(agent13_conf))
+    shapley = attributor.compute()
+
     confidence_score, signals = _compute_confidence(
         acs, agent3_data, agent5_data, scenario_count, fca_class, fca_coverage,
     )
@@ -173,6 +182,8 @@ async def run(state: StoryState) -> AgentResult:
         "fca_coverage_present": fca_coverage,
         "coverage_gaps": gaps,
         "ac_count": ac_count,
+        "shapley_attribution": shapley,
+        "ac_source_trust": agent5_trust,
         "signals": signals,
     }
 

@@ -31,7 +31,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import TierBScorer, build_system, call_with_tool
+from src.agents.base import TierBScorer, build_system, call_with_tool, classify_ta_interaction
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.copado import get_pmd_results
@@ -154,12 +154,29 @@ async def run(state: StoryState) -> AgentResult:
         max_tokens=1200,
     )
 
+    # Ensemble: deterministic PMD-only verdict (Call A) vs Sonnet FCA-context verdict (Call B)
+    call_a_verdict, call_a_conf = _pmd_baseline_verdict(pmd_violations, fca_class)
+    call_b_verdict = extracted.get("quality_verdict", "WARN")
+    call_b_conf, _ = _compute_confidence(pmd_violations, extracted, agent13_data)
+    ta_pos, interaction_mode = classify_ta_interaction(call_a_conf, call_b_conf)
+    ensemble_agreement = call_a_verdict == call_b_verdict
+
+    # Leading call wins based on TA mode; ASSERT/DEFER → leading call; ESCALATE → conservative
+    if interaction_mode in ("ASSERT",):
+        verdict = call_a_verdict
+    elif interaction_mode == "DEFER":
+        verdict = call_b_verdict
+    elif interaction_mode == "ESCALATE":
+        # Neither trusted — take worse verdict for safety
+        verdict = _worse_verdict(call_a_verdict, call_b_verdict)
+    else:
+        verdict = call_b_verdict if ensemble_agreement else _worse_verdict(call_a_verdict, call_b_verdict)
+
     confidence_score, signals = _compute_confidence(pmd_violations, extracted, agent13_data)
     escalated = confidence_score < settings.confidence_escalation_threshold
 
     critical = extracted.get("critical_violations", [])
     high = extracted.get("high_violations", [])
-    verdict = extracted.get("quality_verdict", "WARN")
 
     what = (
         f"Code quality for {story_id}: {len(pmd_violations)} PMD violation(s) — "
@@ -179,6 +196,11 @@ async def run(state: StoryState) -> AgentResult:
         "recommended_fixes": extracted.get("recommended_fixes", []),
         "fca_classification": fca_class,
         "pmd_data_available": len(pmd_violations) > 0 or _copado_responded(pmd_violations),
+        "ensemble_agreement": ensemble_agreement,
+        "ta_position": ta_pos,
+        "interaction_mode": interaction_mode,
+        "call_a_verdict": call_a_verdict,
+        "call_b_verdict": call_b_verdict,
         "signals": signals,
     }
 
@@ -237,6 +259,31 @@ def _compute_confidence(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _pmd_baseline_verdict(violations: list[dict], fca_class: str) -> tuple[str, int]:
+    """Deterministic PMD-only verdict — Call A in the ensemble. Returns (verdict, confidence)."""
+    if any(v["priority"] == 1 for v in violations):
+        return "FAIL", 80
+    if any(v["rule_name"] in _ALWAYS_FAIL_RULES for v in violations):
+        return "FAIL", 85
+    if fca_class in ("HIGH", "MEDIUM") and any(
+        v["rule_name"] in ("ApexCRUDViolation", "ApexSharingViolations") for v in violations
+    ):
+        return "FAIL", 80
+    p2_count = sum(1 for v in violations if v["priority"] == 2)
+    if p2_count >= 3:
+        return "WARN", 75
+    if p2_count > 0:
+        return "WARN", 70
+    return "PASS", 78 if violations else 72
+
+
+_VERDICT_ORDER = {"FAIL": 2, "WARN": 1, "PASS": 0}
+
+
+def _worse_verdict(a: str, b: str) -> str:
+    return a if _VERDICT_ORDER.get(a, 0) >= _VERDICT_ORDER.get(b, 0) else b
+
 
 def _copado_responded(violations: list) -> bool:
     # If Copado is unconfigured, get_pmd_results returns []. We can't tell the

@@ -25,7 +25,9 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import TierBScorer, build_system, call_with_tool
+import asyncio
+
+from src.agents.base import TierBScorer, build_system, call_with_tool, classify_ta_interaction
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_story
@@ -84,12 +86,12 @@ _FCA_TOOL_SCHEMA = {
     },
 }
 
-_FCA_INSTRUCTIONS = """
-You are a senior FCA compliance expert generating regulatory test scenarios for a
-Salesforce FSC Wealth Management platform. Your scenarios must be directly traceable
-to FCA regulatory obligations.
+_FCA_INSTRUCTIONS_CAUTIOUS = """
+You are a cautious FCA compliance expert generating regulatory test scenarios for a
+Salesforce FSC Wealth Management platform. Your mandate: full protection — generate
+the maximum set of scenarios needed to demonstrate regulatory compliance.
 
-Applicable regulations for FSC Wealth Management:
+Applicable regulations:
 - COBS 9: Suitability assessment for personal recommendations
 - COBS 4: Communicating with clients (clear, fair, not misleading)
 - Consumer Duty (PS22/9): Good outcomes for retail customers
@@ -97,14 +99,30 @@ Applicable regulations for FSC Wealth Management:
 - FCA Consumer Duty — Vulnerable Customer provisions (FG21/1)
 
 Rules:
-1. For HIGH-FCA stories: generate scenarios covering COBS 9 suitability, Consumer Duty
-   good outcome requirements, and Vulnerable Customer provisions.
-2. For MEDIUM-FCA stories: cover Consumer Duty and basic COBS requirements.
-3. For LOW-FCA stories: generate a minimal Consumer Duty scenario only.
-4. Each scenario must have observable pass/fail criteria — not vague statements.
-5. If the story has no FCA implications, return WARN with an explanation.
-6. Always check: does this feature make it harder for a Vulnerable Customer to get
-   good outcomes? If yes, flag it.
+1. HIGH-FCA: generate ALL applicable COBS 9, Consumer Duty, and Vulnerable Customer scenarios.
+2. MEDIUM-FCA: cover all Consumer Duty outcomes and COBS requirements.
+3. LOW-FCA: Consumer Duty scenario plus any incidental COBS impact.
+4. Err on the side of MORE scenarios. If uncertain, include it.
+5. Every scenario needs observable pass/fail criteria.
+""".strip()
+
+_FCA_INSTRUCTIONS_PERMISSIVE = """
+You are a pragmatic FCA compliance expert generating the MINIMUM set of regulatory
+test scenarios required for a Salesforce FSC Wealth Management platform story.
+Your mandate: identify only scenarios explicitly required by the applicable rules.
+
+Applicable regulations:
+- COBS 9: Suitability assessment for personal recommendations
+- COBS 4: Communicating with clients (clear, fair, not misleading)
+- Consumer Duty (PS22/9): Good outcomes for retail customers
+- MiFID II Article 25: Appropriateness and suitability
+- FCA Consumer Duty — Vulnerable Customer provisions (FG21/1)
+
+Rules:
+1. Only generate scenarios that are EXPLICITLY required by the applicable FCA rules.
+2. Do not add speculative or precautionary scenarios.
+3. For LOW-FCA stories with no FCA objects touched, return 0 scenarios and WARN.
+4. Every scenario needs observable pass/fail criteria.
 """.strip()
 
 
@@ -129,15 +147,45 @@ async def run(state: StoryState) -> AgentResult:
         story_id, story, fca_class, consumer_duty_risk, risk_level, existing_scenarios,
     )
 
-    result = await call_with_tool(
-        model=settings.default_model,
-        system=build_system(_FCA_INSTRUCTIONS),
-        user_message=user_message,
-        tool_name=_FCA_TOOL_NAME,
-        tool_description="Generate FCA regulatory test scenarios.",
-        tool_schema=_FCA_TOOL_SCHEMA,
-        max_tokens=2500,
+    # Ensemble: permissive (Call A — minimum compliance) vs cautious (Call B — full protection)
+    call_a_result, call_b_result = await asyncio.gather(
+        call_with_tool(
+            model=settings.default_model,
+            system=build_system(_FCA_INSTRUCTIONS_PERMISSIVE),
+            user_message=user_message,
+            tool_name=_FCA_TOOL_NAME,
+            tool_description="Generate minimum required FCA regulatory test scenarios.",
+            tool_schema=_FCA_TOOL_SCHEMA,
+            max_tokens=2000,
+        ),
+        call_with_tool(
+            model=settings.default_model,
+            system=build_system(_FCA_INSTRUCTIONS_CAUTIOUS),
+            user_message=user_message,
+            tool_name=_FCA_TOOL_NAME,
+            tool_description="Generate full FCA regulatory test scenarios.",
+            tool_schema=_FCA_TOOL_SCHEMA,
+            max_tokens=2500,
+        ),
     )
+
+    call_a_verdict = call_a_result.get("fca_scenario_verdict", "WARN")
+    call_b_verdict = call_b_result.get("fca_scenario_verdict", "WARN")
+    call_a_conf, _ = _compute_confidence(
+        agent3_data, agent4_data, agent9_data,
+        len(call_a_result.get("fca_test_scenarios", [])), fca_class,
+        call_a_result.get("consumer_duty_covered", False), call_a_verdict,
+    )
+    call_b_conf, _ = _compute_confidence(
+        agent3_data, agent4_data, agent9_data,
+        len(call_b_result.get("fca_test_scenarios", [])), fca_class,
+        call_b_result.get("consumer_duty_covered", False), call_b_verdict,
+    )
+    ta_pos, interaction_mode = classify_ta_interaction(call_a_conf, call_b_conf)
+    ensemble_agreement = call_a_verdict == call_b_verdict
+
+    # Cautious call wins on disagreement (safer call wins — mirrors Agent 03)
+    result = call_b_result if not ensemble_agreement else call_b_result
 
     fca_scenarios = result.get("fca_test_scenarios", [])
     consumer_duty = result.get("consumer_duty_covered", False)
@@ -168,6 +216,11 @@ async def run(state: StoryState) -> AgentResult:
         "fca_scenario_verdict": verdict,
         "regulatory_gaps": gaps,
         "fca_scenario_count": len(fca_scenarios),
+        "ensemble_agreement": ensemble_agreement,
+        "ta_position": ta_pos,
+        "interaction_mode": interaction_mode,
+        "call_a_scenario_count": len(call_a_result.get("fca_test_scenarios", [])),
+        "call_b_scenario_count": len(call_b_result.get("fca_test_scenarios", [])),
         "signals": signals,
     }
 

@@ -229,7 +229,7 @@ class TestConfidenceScoring:
 
     def test_ensemble_disagreement_signal_recorded(self):
         _, signals = _conf(AGENT3_DISAGREED, 55, None, None, None, None, MOCK_RISK_LOW)
-        assert "agent3_disagreed" in signals
+        assert "agent3_disagreed_ta" in signals
 
     def test_agent3_unavailable_signal_recorded(self):
         _, signals = _conf(None, 0, None, None, None, None, MOCK_RISK_LOW)
@@ -394,3 +394,56 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+    async def test_ta_interaction_summary_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_AGREED}
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_RISK_CRITICAL
+            result = await run(state)
+
+        assert "ta_interaction_summary" in result.data
+        summary = result.data["ta_interaction_summary"]
+        for agent_id in ["1", "2", "3", "4", "5", "54", "6", "8"]:
+            assert agent_id in summary
+            assert summary[agent_id] in ("OK", "NOT_OK")
+
+    async def test_ta_interaction_summary_ok_when_high_confidence(self):
+        state = initial_story_state("FSC-2417")
+        # Agent 3 with confidence >= 60 should be marked OK
+        state["agent_results"]["3"] = {
+            "data": AGENT3_AGREED,
+            "confidence": {"final_score": 85},
+        }
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_RISK_CRITICAL
+            result = await run(state)
+
+        assert result.data["ta_interaction_summary"]["3"] == "OK"
+
+
+# ── TA confidence penalty tests ────────────────────────────────────────────────
+
+class TestTAPenalties:
+    def test_disagreement_penalises_more_than_agreement(self):
+        score_agreed, _ = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        score_disagreed, _ = _conf(AGENT3_DISAGREED, 55, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert score_agreed > score_disagreed
+
+    def test_disagreement_signal_records_ta_key(self):
+        _, signals = _conf(AGENT3_DISAGREED, 55, None, None, None, None, MOCK_RISK_LOW)
+        assert any("agent3_disagreed" in k for k in signals)

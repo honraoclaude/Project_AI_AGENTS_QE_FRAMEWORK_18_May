@@ -497,3 +497,88 @@ class TestAgentRun:
 
         assert result.agent_id == 5
         assert result.data["ac_clause_count"] == 4
+
+
+# ── Mechanism design signal tests ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestMechanismDesign:
+    async def test_generation_mode_trust_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_GENERATED
+            result = await run(state)
+
+        assert "generation_mode_trust" in result.data
+        assert result.data["generation_mode_trust"] in (0.6, 0.8, 1.0)
+
+    async def test_generated_from_scratch_trust_is_0_6(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_GENERATED  # generation_mode = "generated_from_scratch"
+            result = await run(state)
+
+        assert result.data["generation_mode"] == "generated_from_scratch"
+        assert result.data["generation_mode_trust"] == 0.6
+
+    async def test_validated_existing_trust_is_1_0(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = [{"scenario": "existing", "given": [], "when": [], "then": []}]
+            mock_llm.return_value = MOCK_AC_VALIDATED  # generation_mode = "validated_existing"
+            result = await run(state)
+
+        assert result.data["generation_mode"] == "validated_existing"
+        assert result.data["generation_mode_trust"] == 1.0
+
+    async def test_trust_is_downstream_signal_not_self_penalty(self):
+        """generation_mode_trust must be in data regardless of FCA class."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_LOW}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_LABEL_CHANGE
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_LOW_FCA  # generation_mode = "generated_from_scratch"
+            result = await run(state)
+
+        assert "generation_mode_trust" in result.data

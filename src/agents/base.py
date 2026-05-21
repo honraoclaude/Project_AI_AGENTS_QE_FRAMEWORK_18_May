@@ -14,7 +14,7 @@ Key patterns:
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
 
@@ -233,24 +233,67 @@ class ShapleyAttributor:
     """
 
     def __init__(self) -> None:
-        self._agents: list[tuple[str, int, bool]] = []
+        self._agents: list[tuple[str, int, bool, float]] = []
 
-    def add_agent(self, agent_id: str, confidence: int, data_present: bool) -> None:
+    def add_agent(
+        self,
+        agent_id: str,
+        confidence: int,
+        data_present: bool,
+        ta_trust_multiplier: float = 1.0,
+    ) -> None:
         if not (0 <= confidence <= 100):
             raise ValueError(f"confidence must be 0-100, got {confidence} for agent {agent_id}")
-        self._agents.append((agent_id, confidence, data_present))
+        if ta_trust_multiplier not in (0.5, 1.0):
+            raise ValueError(f"ta_trust_multiplier must be 0.5 or 1.0, got {ta_trust_multiplier}")
+        self._agents.append((agent_id, confidence, data_present, ta_trust_multiplier))
 
     def compute(self) -> dict[str, float]:
         """Returns {agent_id: shapley_value} normalised to sum ≈ 100.0."""
         raw: dict[str, float] = {
-            aid: (conf * (1.0 if present else 0.0))
-            for aid, conf, present in self._agents
+            aid: conf * (1.0 if present else 0.0) * mult
+            for aid, conf, present, mult in self._agents
         }
         total = sum(raw.values())
         if total == 0.0:
             equal = round(100.0 / len(self._agents), 2) if self._agents else 0.0
-            return {aid: equal for aid, _, _ in self._agents}
+            return {aid: equal for aid, _, _, _ in self._agents}
         return {aid: round(v / total * 100.0, 2) for aid, v in raw.items()}
+
+
+# ── Transactional Analysis interaction classification ─────────────────────────
+
+TAPosition = Literal["OK_OK", "OK_NOT_OK", "NOT_OK_OK", "NOT_OK_NOT_OK"]
+InteractionMode = Literal["COLLABORATE", "ASSERT", "DEFER", "ESCALATE"]
+
+
+def classify_ta_interaction(
+    conf_a: int, conf_b: int, threshold: int = 60
+) -> tuple[str, str]:
+    """
+    Classifies a two-agent interaction using Thomas Harris TA life positions.
+
+    Both ≥ threshold → OK_OK / COLLABORATE (full Shapley weight)
+    A ok, B not     → OK_NOT_OK / ASSERT   (A leads, B adversarially reviewed)
+    A not, B ok     → NOT_OK_OK / DEFER    (B leads, A 50% Shapley discount)
+    Both < threshold → NOT_OK_NOT_OK / ESCALATE (human escalation required)
+
+    threshold=60 mirrors the system-wide escalation boundary in adaptive_threshold().
+    """
+    a_ok = conf_a >= threshold
+    b_ok = conf_b >= threshold
+    if a_ok and b_ok:
+        return "OK_OK", "COLLABORATE"
+    if a_ok:
+        return "OK_NOT_OK", "ASSERT"
+    if b_ok:
+        return "NOT_OK_OK", "DEFER"
+    return "NOT_OK_NOT_OK", "ESCALATE"
+
+
+def _ta_mult(conf: int, threshold: int = 60) -> float:
+    """Returns 1.0 (OK) or 0.5 (NOT_OK) for use as a ShapleyAttributor trust multiplier."""
+    return 1.0 if conf >= threshold else 0.5
 
 
 _VALID_FCA_TIERS = {"HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"}

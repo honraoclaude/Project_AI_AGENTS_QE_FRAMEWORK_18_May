@@ -185,6 +185,12 @@ async def run(state: StoryState) -> AgentResult:
         "data_verdict": verdict,
         "coverage_gaps": gaps,
         "seed_record_count": len(seed_records),
+        "data_design_completeness": _compute_completeness(
+            seed_records, fca_class, vulnerable_profiles, verdict, anon_fields
+        ),
+        "mechanism_signal": _build_mechanism_signal(
+            seed_records, fca_class, vulnerable_profiles, verdict, anon_fields
+        ),
         "signals": signals,
     }
 
@@ -275,6 +281,42 @@ def _build_prompt(
         else "  (no Gherkin scenarios available)"
         + f"\n\nDesign the test data strategy using the {_DATA_TOOL_NAME} tool."
     )
+
+
+# ── Mechanism design helpers ──────────────────────────────────────────────────
+
+def _compute_completeness(
+    seed_records: list,
+    fca_class: str,
+    vulnerable_profiles: list,
+    verdict: str,
+    anon_fields: list,
+) -> int:
+    score = 100
+    if not seed_records:
+        score -= 30
+    if fca_class in ("HIGH", "MEDIUM") and not vulnerable_profiles:
+        score -= 25
+    if not anon_fields:
+        score -= 15
+    if verdict == "INCOMPLETE":
+        score -= 20
+    return max(0, score)
+
+
+def _build_mechanism_signal(
+    seed_records: list,
+    fca_class: str,
+    vulnerable_profiles: list,
+    verdict: str,
+    anon_fields: list,
+) -> dict:
+    completeness = _compute_completeness(seed_records, fca_class, vulnerable_profiles, verdict, anon_fields)
+    return {
+        "vulnerable_profile_missing": fca_class in ("HIGH", "MEDIUM") and not vulnerable_profiles,
+        "seed_records_missing": not seed_records,
+        "downstream_penalty_active": completeness < 70,
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

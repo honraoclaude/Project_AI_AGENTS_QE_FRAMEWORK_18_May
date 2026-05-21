@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_34_defect_triage import (
+    _build_severity_votes,
     _compute_confidence,
+    _infer_severity,
+    _resolve_severity_votes,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -241,3 +244,159 @@ class TestAgentRun:
 
         assert result.agent_id == 34
         assert result.data["defect_verdict"] in ("PASS", "WARN", "FAIL")
+
+
+# ── Severity voting unit tests ────────────────────────────────────────────────
+
+class TestInferSeverity:
+    def test_fail_with_count_produces_p1(self):
+        assert _infer_severity("FAIL", 2) == "P1"
+
+    def test_warn_with_count_produces_p2(self):
+        assert _infer_severity("WARN", 1) == "P2"
+
+    def test_fail_without_count_produces_p2(self):
+        assert _infer_severity("FAIL", 0) == "P2"
+
+    def test_pass_produces_p3(self):
+        assert _infer_severity("PASS", 0) == "P3"
+
+    def test_pass_with_count_still_p3(self):
+        assert _infer_severity("PASS", 5) == "P3"
+
+
+class TestBuildSeverityVotes:
+    def test_returns_five_source_keys(self):
+        votes = _build_severity_votes(
+            AGENT27_PASS, AGENT28_CLEAN, AGENT30_PASS, AGENT31_PASS, AGENT37_SKIPPED,
+        )
+        assert set(votes.keys()) == {"crt", "fca_scenario", "financial", "performance", "self_heal"}
+
+    def test_crt_fail_produces_p1(self):
+        votes = _build_severity_votes(
+            AGENT27_FAIL, AGENT28_CLEAN, AGENT30_PASS, AGENT31_PASS, AGENT37_SKIPPED,
+        )
+        assert votes["crt"] == "P1"
+
+    def test_all_pass_produces_all_p3(self):
+        votes = _build_severity_votes(
+            AGENT27_PASS, AGENT28_CLEAN, AGENT30_PASS, AGENT31_PASS, AGENT37_SKIPPED,
+        )
+        assert all(v == "P3" for v in votes.values())
+
+    def test_none_data_handled_gracefully(self):
+        votes = _build_severity_votes(None, None, None, None, None)
+        assert len(votes) == 5
+        assert all(v in ("P1", "P2", "P3", "P4") for v in votes.values())
+
+
+class TestResolveSeverityVotes:
+    def test_any_p1_vote_forces_p1_final(self):
+        votes = {"crt": "P1", "fca_scenario": "P3", "financial": "P3", "performance": "P3", "self_heal": "P3"}
+        severity, minimax_escalated = _resolve_severity_votes(votes)
+        assert severity == "P1"
+
+    def test_p1_escalated_when_not_unanimous(self):
+        votes = {"crt": "P1", "fca_scenario": "P3", "financial": "P3", "performance": "P3", "self_heal": "P3"}
+        severity, minimax_escalated = _resolve_severity_votes(votes)
+        assert minimax_escalated is True
+
+    def test_all_p1_not_minimax_escalated(self):
+        votes = {"crt": "P1", "fca_scenario": "P1", "financial": "P1", "performance": "P1", "self_heal": "P1"}
+        severity, minimax_escalated = _resolve_severity_votes(votes)
+        assert severity == "P1"
+        assert minimax_escalated is False
+
+    def test_majority_p3_wins_no_escalation(self):
+        votes = {"crt": "P3", "fca_scenario": "P3", "financial": "P2", "performance": "P3", "self_heal": "P3"}
+        severity, minimax_escalated = _resolve_severity_votes(votes)
+        assert severity == "P3"
+        assert minimax_escalated is False
+
+
+# ── Coalition integration tests ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestCoalitionSeverityVoting:
+    async def test_severity_votes_in_data_with_five_keys(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["27"] = {"data": AGENT27_PASS}
+        state["agent_results"]["28"] = {"data": AGENT28_CLEAN}
+        state["agent_results"]["30"] = {"data": AGENT30_PASS}
+        state["agent_results"]["31"] = {"data": AGENT31_PASS}
+        state["agent_results"]["37"] = {"data": AGENT37_SKIPPED}
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert "severity_votes" in result.data
+        votes = result.data["severity_votes"]
+        assert set(votes.keys()) == {"crt", "fca_scenario", "financial", "performance", "self_heal"}
+
+    async def test_coalition_severity_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["27"] = {"data": AGENT27_PASS}
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert "coalition_severity" in result.data
+        assert result.data["coalition_severity"] in ("P1", "P2", "P3", "P4")
+
+    async def test_minimax_escalated_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert "minimax_escalated" in result.data
+        assert isinstance(result.data["minimax_escalated"], bool)
+
+    async def test_coalition_dissent_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert "coalition_dissent" in result.data
+        assert isinstance(result.data["coalition_dissent"], list)
+
+    async def test_crt_fail_triggers_p1_coalition_severity(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["27"] = {"data": AGENT27_FAIL}
+        state["agent_results"]["28"] = {"data": AGENT28_CLEAN}
+        state["agent_results"]["30"] = {"data": AGENT30_PASS}
+        state["agent_results"]["31"] = {"data": AGENT31_PASS}
+        state["agent_results"]["37"] = {"data": AGENT37_SKIPPED}
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRITICAL_DEFECT
+            result = await run(state)
+
+        assert result.data["coalition_severity"] == "P1"
+        assert result.data["minimax_escalated"] is True
+
+    async def test_all_pass_no_dissent_p3_severity(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["27"] = {"data": AGENT27_PASS}
+        state["agent_results"]["28"] = {"data": AGENT28_CLEAN}
+        state["agent_results"]["30"] = {"data": AGENT30_PASS}
+        state["agent_results"]["31"] = {"data": AGENT31_PASS}
+        state["agent_results"]["37"] = {"data": AGENT37_SKIPPED}
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert result.data["coalition_severity"] == "P3"
+        assert result.data["coalition_dissent"] == []

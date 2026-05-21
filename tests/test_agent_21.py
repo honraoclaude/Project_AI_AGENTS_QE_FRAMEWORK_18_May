@@ -292,3 +292,107 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+
+# ── Mechanism design signal tests ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestMechanismDesign:
+    async def test_data_design_completeness_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["19"] = {"data": AGENT19_DATA}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert "data_design_completeness" in result.data
+        completeness = result.data["data_design_completeness"]
+        assert 0 <= completeness <= 100
+
+    async def test_mechanism_signal_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert "mechanism_signal" in result.data
+        signal = result.data["mechanism_signal"]
+        assert "vulnerable_profile_missing" in signal
+        assert "seed_records_missing" in signal
+        assert "downstream_penalty_active" in signal
+
+    async def test_downstream_penalty_active_when_incomplete(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_INCOMPLETE
+            result = await run(state)
+
+        assert result.data["mechanism_signal"]["downstream_penalty_active"] is True
+
+    async def test_completeness_100_with_full_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["19"] = {"data": AGENT19_DATA}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        # MOCK_DATA_PASS has seed_records, anonymisation_fields, and vulnerable_profiles
+        assert result.data["data_design_completeness"] >= 70
+
+    async def test_no_seed_records_reduces_completeness(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result_pass = await run(state)
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_INCOMPLETE
+            result_incomplete = await run(state)
+
+        assert result_pass.data["data_design_completeness"] > result_incomplete.data["data_design_completeness"]

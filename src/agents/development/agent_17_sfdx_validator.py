@@ -227,10 +227,7 @@ def _build_trace_message(
 def _get_changed_files(agent13_data: dict | None) -> list[dict]:
     if not agent13_data:
         return []
-    # Agent 13 stores changed_files_count but not the full list.
-    # Reconstruct minimal list from detected objects for validation.
-    # In production, Agent 13 would pass the full list; this stub works with count.
-    return []
+    return agent13_data.get("changed_files", [])
 
 
 def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:

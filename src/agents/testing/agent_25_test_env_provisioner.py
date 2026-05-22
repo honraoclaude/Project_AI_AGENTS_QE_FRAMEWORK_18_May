@@ -143,7 +143,6 @@ def _check_environment(
 
     # Test data seeding from Agent 21
     data_verdict = (agent21_data or {}).get("data_verdict", "")
-    seed_count = (agent21_data or {}).get("seed_record_count", 0)
 
     if data_verdict == "INCOMPLETE":
         blockers.append("Test data strategy INCOMPLETE — no records to seed")

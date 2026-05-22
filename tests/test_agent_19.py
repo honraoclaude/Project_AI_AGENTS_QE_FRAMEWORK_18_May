@@ -311,3 +311,169 @@ class TestShapleyAttribution:
 
         assert "ac_source_trust" in result.data
         assert result.data["ac_source_trust"] == 0.6
+
+
+# ── REQ-12: vulnerable_customer + bulk risk tests ─────────────────────────────
+
+MOCK_GHERKIN_WITH_VC = {
+    "scenarios": [
+        {
+            "title": "Vulnerable Customer receives Consumer Duty confirmation step",
+            "tags": ["@fca", "@vulnerable_customer"],
+            "steps": [
+                "Given a client with VulnerableCustomerIndicator__c = true",
+                "When the Suitability Assessment flow runs",
+                "Then the Consumer Duty confirmation step is presented",
+                "And the step must be acknowledged before proceeding",
+            ],
+        },
+    ],
+    "scenario_count": 1,
+    "gherkin_verdict": "PASS",
+    "fca_coverage_present": True,
+    "vulnerable_customer_coverage_present": True,
+    "coverage_gaps": [],
+}
+
+MOCK_GHERKIN_WITH_BULK = {
+    "scenarios": [
+        {
+            "title": "Bulk insert of 200 FinancialHolding records does not breach governor limits",
+            "tags": ["@bulk", "@regression"],
+            "steps": [
+                "Given 200 FinancialHolding records are queued for insert",
+                "When the trigger fires on all 200 records in a single batch",
+                "Then no DML governor limit exception is thrown",
+                "And all 200 records are correctly created",
+            ],
+        },
+    ],
+    "scenario_count": 1,
+    "gherkin_verdict": "PASS",
+    "fca_coverage_present": False,
+    "vulnerable_customer_coverage_present": False,
+    "coverage_gaps": [],
+}
+
+
+@pytest.mark.asyncio
+class TestVulnerableCustomerBulkREQ12:
+    async def test_vc_impact_true_in_prompt(self):
+        """REQ-12: vulnerable_customer_impact=True from Agent 04 appears in prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["4"] = {"data": {"vulnerable_customer_impact": True}}
+
+        captured_message = None
+
+        async def capture(**kwargs):
+            nonlocal captured_message
+            captured_message = kwargs.get("user_message", "")
+            return MOCK_GHERKIN_PASS
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  side_effect=capture),
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            await run(state)
+
+        assert "Vulnerable Customer Impact: TRUE" in captured_message
+
+    async def test_bulk_risk_high_in_prompt(self):
+        """REQ-12: bulk_risk_level=HIGH from Agent 16 appears in prompt with factors."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["16"] = {"data": {
+            "bulk_risk_level": "HIGH",
+            "bulk_risk_factors": ["DML governor limits", "large data volume"],
+        }}
+
+        captured_message = None
+
+        async def capture(**kwargs):
+            nonlocal captured_message
+            captured_message = kwargs.get("user_message", "")
+            return MOCK_GHERKIN_PASS
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  side_effect=capture),
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            await run(state)
+
+        assert "Bulk Risk Level: HIGH" in captured_message
+        assert "DML governor limits" in captured_message
+
+    async def test_vc_coverage_present_in_output_data(self):
+        """REQ-12: vulnerable_customer_coverage_present present in result.data."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["4"] = {"data": {"vulnerable_customer_impact": True}}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_WITH_VC
+            result = await run(state)
+
+        assert "vulnerable_customer_coverage_present" in result.data
+        assert result.data["vulnerable_customer_coverage_present"] is True
+
+    async def test_bulk_test_scenarios_generated_true_when_bulk_tagged(self):
+        """REQ-12: bulk_test_scenarios_generated=True when a @bulk scenario is in output."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["16"] = {"data": {
+            "bulk_risk_level": "HIGH",
+            "bulk_risk_factors": ["DML governor limits"],
+        }}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_WITH_BULK
+            result = await run(state)
+
+        assert "bulk_test_scenarios_generated" in result.data
+        assert result.data["bulk_test_scenarios_generated"] is True
+
+    async def test_bulk_test_scenarios_generated_false_when_no_bulk_tag(self):
+        """REQ-12: bulk_test_scenarios_generated=False when no @bulk tag in any scenario."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS  # no @bulk tags
+            result = await run(state)
+
+        assert result.data["bulk_test_scenarios_generated"] is False

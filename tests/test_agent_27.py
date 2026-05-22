@@ -187,3 +187,35 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-19: Tags carried into execution result dicts ──────────────────────────
+
+class TestTagsCarriedREQ19:
+    def test_test_case_tags_carried_into_result_dict(self):
+        results, _, _, _, _ = _simulate_execution(AGENT25_READY, AGENT26_TESTS)
+        fca_result = next((r for r in results if r.get("test_id") == "CRT-001"), None)
+        assert fca_result is not None
+        assert "@fca" in fca_result.get("tags", [])
+
+    def test_smoke_tags_carried_into_result_dict(self):
+        results, _, _, _, _ = _simulate_execution(AGENT25_READY, AGENT26_TESTS)
+        smoke_result = next((r for r in results if r.get("test_id") == "CRT-002"), None)
+        assert smoke_result is not None
+        assert "@smoke" in smoke_result.get("tags", [])
+
+    def test_results_without_tags_have_empty_tags_list(self):
+        agent26_no_tags = {
+            "crt_test_cases": [
+                {"test_id": "CRT-001", "title": "Test with no tags", "steps": [], "data_references": []},
+            ],
+            "crt_test_count": 1,
+            "crt_design_verdict": "PASS",
+            "automation_coverage": 100.0,
+        }
+        results, _, _, _, _ = _simulate_execution(AGENT25_READY, agent26_no_tags)
+        assert results[0].get("tags", []) == []
+
+
+# ── REQ-18: Gate G5 SKIPPED test (integration) ───────────────────────────────
+# (Gate G5 test lives in test_testing_phase.py — see tests added alongside REQ-18)

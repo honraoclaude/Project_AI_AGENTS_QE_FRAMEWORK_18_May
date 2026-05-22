@@ -103,9 +103,13 @@ _TOOL_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "string",
-                "enum": ["ApexUnit", "CRT", "Jest", "LWCTest", "Selenium", "Copado"],
+                "enum": ["ApexUnit", "CRT", "Jest", "LWCTest", "Selenium", "Copado", "Postman", "ManualTest"],
             },
-            "description": "Test frameworks/tools required for this story's test pyramid.",
+            "description": (
+                "Test frameworks/tools required for this story's test pyramid. "
+                "Postman: include when story touches external REST/SOAP callouts, Named Credentials, or ConnectedApps. "
+                "ManualTest: include when story has exploratory, accessibility, or UAT scenarios that are explicitly not automatable."
+            ),
         },
         "risk_areas": {
             "type": "array",
@@ -165,6 +169,12 @@ Risk Areas — always include:
 - Governor limit risk if the trigger/flow processes many related records
 - Consumer Duty risk if VulnerableCustomerIndicator__c is involved
 
+Tool selection guidance:
+- Include Postman when the story references external REST/SOAP callouts, Named Credentials,
+  External Data Sources, Connected Apps, or integration with external AUM/financial data providers.
+- Include ManualTest when the story explicitly contains exploratory testing, accessibility
+  validation, or UAT scenarios that are deliberately out of scope for automation.
+
 Use the design_test_strategy tool to return your assessment.
 """.strip()
 
@@ -196,27 +206,28 @@ async def run(state: StoryState) -> AgentResult:
     escalated = confidence_score < settings.confidence_escalation_threshold
     fca_class = (agent3_data or {}).get("fca_classification", "UNCLASSIFIED")
 
+    cov_pct = extracted.get("coverage_target_pct", 75)
     what = (
-        f"Test strategy for {story_id}: coverage={extracted['coverage_target_pct']}%, "
-        f"apex_classes={len(extracted['apex_unit_test_classes'])}, "
-        f"crt_scenarios={extracted['crt_recommended_count']}, "
-        f"risk_areas={len(extracted['risk_areas'])}"
+        f"Test strategy for {story_id}: coverage={cov_pct}%, "
+        f"apex_classes={len(extracted.get('apex_unit_test_classes', []))}, "
+        f"crt_scenarios={extracted.get('crt_recommended_count', 0)}, "
+        f"risk_areas={len(extracted.get('risk_areas', []))}"
     )
     why = (
         f"Test Design Strategy Agent applied PACT coverage standards for a {fca_class}-FCA story. "
-        f"Coverage target is {extracted['coverage_target_pct']}% "
-        f"({'85% PACT standard' if extracted['coverage_target_pct'] == 85 else '75% platform minimum'})."
+        f"Coverage target is {cov_pct}% "
+        f"({'85% PACT standard' if cov_pct == 85 else '75% platform minimum'})."
     )
 
     data = {
-        "coverage_target_pct": extracted["coverage_target_pct"],
-        "apex_unit_test_classes": extracted["apex_unit_test_classes"],
-        "integration_test_scope": extracted["integration_test_scope"],
-        "ui_test_components": extracted["ui_test_components"],
-        "crt_recommended_count": extracted["crt_recommended_count"],
-        "test_tools": extracted["test_tools"],
-        "risk_areas": extracted["risk_areas"],
-        "test_strategy_summary": extracted["test_strategy_summary"],
+        "coverage_target_pct": cov_pct,
+        "apex_unit_test_classes": extracted.get("apex_unit_test_classes", []),
+        "integration_test_scope": extracted.get("integration_test_scope", []),
+        "ui_test_components": extracted.get("ui_test_components", []),
+        "crt_recommended_count": extracted.get("crt_recommended_count", 0),
+        "test_tools": extracted.get("test_tools", []),
+        "risk_areas": extracted.get("risk_areas", []),
+        "test_strategy_summary": extracted.get("test_strategy_summary", ""),
         "fca_classification_context": fca_class,
         "signals": signals,
     }
@@ -276,8 +287,9 @@ def _compute_confidence(
         scorer.add("invest_fail", invest_score, -3)
 
     # Signal 4: CRT scenarios recommended — confirms test scope was identified
-    if extracted.get("crt_recommended_count", 0) > 0:
-        scorer.add("crt_scenarios_identified", extracted["crt_recommended_count"], +5)
+    crt_count = extracted.get("crt_recommended_count", 0)
+    if crt_count > 0:
+        scorer.add("crt_scenarios_identified", crt_count, +5)
 
     # Signal 5: Risk areas identified — confirms thorough analysis
     risk_count = len(extracted.get("risk_areas", []))

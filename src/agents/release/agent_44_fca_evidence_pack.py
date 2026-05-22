@@ -114,12 +114,13 @@ async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent3_data,  agent3_conf  = get_agent_result(state, "3")
     agent4_data,  agent4_conf  = get_agent_result(state, "4")
+    agent29_data, agent29_conf = get_agent_result(state, "29")
     agent30_data, agent30_conf = get_agent_result(state, "30")
     agent33_data, agent33_conf = get_agent_result(state, "33")
     agent36_data, agent36_conf = get_agent_result(state, "36")
 
     evidence_msg = _build_evidence_message(
-        story_id, agent3_data, agent4_data, agent30_data, agent33_data, agent36_data,
+        story_id, agent3_data, agent4_data, agent29_data, agent30_data, agent33_data, agent36_data,
     )
     result_data = await _run_evidence(evidence_msg)
 
@@ -239,19 +240,24 @@ def _build_evidence_message(
     story_id: str,
     agent3_data: dict | None,
     agent4_data: dict | None,
+    agent29_data: dict | None,
     agent30_data: dict | None,
     agent33_data: dict | None,
     agent36_data: dict | None,
 ) -> str:
     fca_class      = (agent3_data or {}).get("fca_classification", "LOW")
     cd_verdict     = (agent4_data or {}).get("consumer_duty_verdict", "PASS")
-    cd_obligations = (agent4_data or {}).get("obligations_mapped", [])
+    cd_obligations = (agent4_data or {}).get("cd_obligations", [])   # REQ-28 Bug 1: fixed key
     fca_verdict    = (agent30_data or {}).get("fca_scenario_verdict", "PASS")
     fca_count      = (agent30_data or {}).get("fca_scenario_count", 0)
     reg_gaps       = (agent30_data or {}).get("regulatory_gaps", [])
     coverage_pct   = (agent33_data or {}).get("overall_coverage_pct", 0.0)
     cov_verdict    = (agent33_data or {}).get("coverage_verdict", "PASS")
-    uat_coord      = (agent36_data or {}).get("uat_coordination_verdict", "NOT_REQUIRED")
+    # REQ-28 Gap 3: prefer Agent 36 uat_coord when available; fall back to Agent 29 co_required
+    uat_coord      = (agent36_data or {}).get("uat_coordination_verdict")
+    if uat_coord is None:
+        co_required = (agent29_data or {}).get("co_sign_off_required", False)
+        uat_coord = "CO_REQUIRED" if co_required else "NOT_REQUIRED"
 
     return (
         f"Story: {story_id}\n"

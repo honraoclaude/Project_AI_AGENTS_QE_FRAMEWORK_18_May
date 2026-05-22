@@ -126,8 +126,8 @@ def _run_smoke_tests(
     """Returns (passed, test_count, failed_count, suite, verdict)."""
     dry_run_success = (agent42_data or {}).get("dry_run_success", False)
     dry_run_verdict = (agent42_data or {}).get("dry_run_verdict", "SKIPPED")
-    regression_risk = (agent32_data or {}).get("regression_risk", "LOW")
-    suite_type      = (agent32_data or {}).get("recommended_suite", "SMOKE")
+    regression_risk = (agent32_data or {}).get("regression_risk_level", "LOW")
+    suite_type      = (agent32_data or {}).get("recommended_regression_suite", "SMOKE")
 
     if not dry_run_success or dry_run_verdict in ("FAIL", "SKIPPED"):
         return False, 0, 0, "SMOKE", "SKIPPED"

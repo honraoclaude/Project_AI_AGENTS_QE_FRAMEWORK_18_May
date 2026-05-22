@@ -52,6 +52,7 @@ _TOOL_SCHEMA = {
         "data_dependencies_ordered",
         "data_volume",
         "risks",
+        "fca_context_available",
     ],
     "properties": {
         "required_records": {
@@ -137,6 +138,14 @@ _TOOL_SCHEMA = {
                 "Minimum 1 entry."
             ),
         },
+        "fca_context_available": {
+            "type": "boolean",
+            "description": (
+                "Always return False — Agent 7 runs in Batch 2 before FCA classification "
+                "is available. The data isolation strategy is set without FCA tier context; "
+                "Agent 21 will reconcile if the tier requires a stronger strategy."
+            ),
+        },
     },
 }
 
@@ -162,6 +171,11 @@ Data isolation rules for FSC:
   that would affect subsequent tests.
 - NEVER recommend shared_org_data for objects in HIGH or MEDIUM FCA tier.
   State pollution across tests is a compliance risk.
+- IMPORTANT: You run before FCA classification is available (fca_context_available=False always).
+  As a defensive default, NEVER recommend shared_org_data unless the story description
+  explicitly confirms the objects are non-regulated config metadata. When in doubt,
+  default to per_class_setup. Agent 21 will escalate to per_test_setup_teardown if the
+  FCA tier requires it.
 
 Sensitive data:
 - VulnerableCustomerIndicator__c must ALWAYS use synthetic boolean flags — never
@@ -182,6 +196,8 @@ Use the identify_data_needs tool to return your assessment.
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent1_data = _get_agent_data(state, "1")
+    # Agent 7 runs in Batch 2 (parallel with Agents 2, 3) — FCA classification not yet available
+    fca_context_available = False
 
     story = await get_story(story_id)
 
@@ -203,9 +219,9 @@ async def run(state: StoryState) -> AgentResult:
     records = extracted.get("required_records", [])
     what = (
         f"Data needs for {story_id}: {len(records)} record type(s) required, "
-        f"volume={extracted['data_volume']}, "
-        f"isolation={extracted['data_isolation_strategy']}, "
-        f"sensitive={extracted['sensitive_data_present']}"
+        f"volume={extracted.get('data_volume', 'minimal')}, "
+        f"isolation={extracted.get('data_isolation_strategy', 'per_class_setup')}, "
+        f"sensitive={extracted.get('sensitive_data_present', False)}"
     )
     why = (
         "Data Need Agent mapped FSC object dependency rules to identify the minimum "
@@ -213,16 +229,22 @@ async def run(state: StoryState) -> AgentResult:
         f"Insertion order: {' → '.join(extracted.get('data_dependencies_ordered', ['N/A'])[:3])}."
     )
 
+    isolation = extracted.get("data_isolation_strategy", "per_class_setup")
+    # Defensive override: shared_org_data is never safe without confirmed FCA tier
+    if isolation == "shared_org_data" and not fca_context_available:
+        isolation = "per_class_setup"
+
     data = {
         "required_records": records,
-        "data_isolation_strategy": extracted["data_isolation_strategy"],
-        "sensitive_data_present": extracted["sensitive_data_present"],
+        "data_isolation_strategy": isolation,
+        "sensitive_data_present": extracted.get("sensitive_data_present", False),
         "sensitive_data_fields": extracted.get("sensitive_data_fields", []),
         "factory_classes_recommended": extracted.get("factory_classes_recommended", []),
         "data_dependencies_ordered": extracted.get("data_dependencies_ordered", []),
-        "data_volume": extracted["data_volume"],
+        "data_volume": extracted.get("data_volume", "minimal"),
         "risks": extracted.get("risks", []),
         "required_record_count": len(records),
+        "fca_context_available": fca_context_available,
         "signals": signals,
     }
 

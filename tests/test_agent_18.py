@@ -127,7 +127,7 @@ class TestComponentAnalysis:
             {"file_path": "force-app/main/default/classes/Utils.cls",
              "author_email": "dev@firm.com"}
         ]
-        components, regulated, merge_risk, verdict = _analyse_components(files)
+        components, regulated, merge_risk, verdict, author_data_available = _analyse_components(files)
         assert verdict == "PASS"
         assert len(regulated) == 0
         assert len(merge_risk) == 0
@@ -137,7 +137,7 @@ class TestComponentAnalysis:
             {"file_path": "force-app/main/default/classes/SuitabilityService.cls",
              "author_email": "dev@firm.com"}
         ]
-        _, regulated, _, verdict = _analyse_components(files)
+        _, regulated, _, verdict, _ = _analyse_components(files)
         assert len(regulated) >= 1
         assert verdict == "WARN"
 
@@ -148,7 +148,7 @@ class TestComponentAnalysis:
             {"file_path": "force-app/main/default/classes/Utils.cls",
              "author_email": "dev2@firm.com"},
         ]
-        _, _, merge_risk, verdict = _analyse_components(files)
+        _, _, merge_risk, verdict, _ = _analyse_components(files)
         assert len(merge_risk) >= 1
         assert verdict == "WARN"
 
@@ -159,13 +159,65 @@ class TestComponentAnalysis:
             {"file_path": "force-app/main/default/classes/SuitabilityService.cls",
              "author_email": "dev2@firm.com"},
         ]
-        _, regulated, merge_risk, verdict = _analyse_components(files)
+        _, regulated, merge_risk, verdict, _ = _analyse_components(files)
         assert verdict == "REVIEW_REQUIRED"
 
     def test_empty_files_gives_pass(self):
-        components, regulated, merge_risk, verdict = _analyse_components([])
+        components, regulated, merge_risk, verdict, author_data_available = _analyse_components([])
         assert verdict == "PASS"
         assert len(components) == 0
+
+
+# ── REQ-11: author_data_available tests ──────────────────────────────────────
+
+class TestAuthorDataAvailableREQ11:
+    def test_no_author_email_gives_author_data_unavailable(self):
+        files = [
+            {"file_path": "force-app/main/default/classes/Utils.cls", "author_email": ""},
+            {"file_path": "force-app/main/default/classes/Other.cls"},
+        ]
+        _, _, _, _, author_data_available = _analyse_components(files)
+        assert author_data_available is False
+
+    def test_with_author_email_gives_author_data_available(self):
+        files = [
+            {"file_path": "force-app/main/default/classes/Utils.cls",
+             "author_email": "dev@firm.com"},
+        ]
+        _, _, _, _, author_data_available = _analyse_components(files)
+        assert author_data_available is True
+
+    def test_no_author_email_merge_risk_not_possible_flag_in_gaps(self):
+        files = [
+            {"file_path": "force-app/main/default/classes/Utils.cls", "author_email": ""},
+        ]
+        components, _, _, verdict, _ = _analyse_components(files)
+        # verdict is PASS (no regulated, no merge risk detected)
+        assert verdict == "PASS"
+
+    def test_two_authors_merge_risk_detected_correctly(self):
+        files = [
+            {"file_path": "force-app/main/default/classes/Utils.cls",
+             "author_email": "dev1@firm.com"},
+            {"file_path": "force-app/main/default/classes/Utils.cls",
+             "author_email": "dev2@firm.com"},
+        ]
+        _, _, merge_risk, verdict, author_data_available = _analyse_components(files)
+        assert author_data_available is True
+        assert len(merge_risk) >= 1
+
+    @pytest.mark.asyncio
+    async def test_author_data_available_in_run_output(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_WITH_FILES}
+
+        with patch("src.agents.development.agent_18_component_attribution.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "author_data_available" in result.data
+        assert result.data["author_data_available"] is True
 
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────

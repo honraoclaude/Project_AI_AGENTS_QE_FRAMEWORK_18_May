@@ -62,12 +62,14 @@ _AC_CLAUSE_SCHEMA = {
         },
         "scenario_type": {
             "type": "string",
-            "enum": ["happy_path", "error_path", "edge_case", "regulatory"],
+            "enum": ["happy_path", "error_path", "edge_case", "regulatory", "vulnerable_customer"],
             "description": (
                 "happy_path: the primary success flow. "
                 "error_path: a precondition fails or an invalid action is attempted. "
                 "edge_case: boundary condition, duplicate, concurrent access, or unusual state. "
-                "regulatory: directly tests an FCA obligation (COBS, Consumer Duty, FG21/1)."
+                "regulatory: directly tests an FCA obligation (COBS, Consumer Duty, FG21/1). "
+                "vulnerable_customer: tests the specific pathway for clients with VulnerableCustomerIndicator__c=true "
+                "(FG21/1 obligation). Use this when vulnerable_customer_impact=True from Agent 04."
             ),
         },
         "test_category": {
@@ -134,7 +136,7 @@ _TOOL_SCHEMA = {
         },
         "coverage_assessment": {
             "type": "object",
-            "required": ["happy_path", "error_paths", "edge_cases", "regulatory"],
+            "required": ["happy_path", "error_paths", "edge_cases", "regulatory", "vulnerable_customer"],
             "properties": {
                 "happy_path": {
                     "type": "boolean",
@@ -153,6 +155,13 @@ _TOOL_SCHEMA = {
                     "description": (
                         "True if at least one regulatory scenario is present. "
                         "Required for HIGH-FCA stories; false for LOW-FCA."
+                    ),
+                },
+                "vulnerable_customer": {
+                    "type": "boolean",
+                    "description": (
+                        "True if at least one vulnerable_customer scenario is present. "
+                        "Required when vulnerable_customer_impact=True from Agent 04."
                     ),
                 },
             },
@@ -215,8 +224,15 @@ Required scenario coverage:
    For COBS 9.2: test that the suitability assessment is blocked without prior RiskProfile.
    For Consumer Duty: test that vulnerable customers receive the additional confirmation step.
    For FG21/1: test that VulnerableCustomerIndicator__c = true triggers the correct pathway.
+5. vulnerable_customer (when vulnerable_customer_impact=True from Agent 04): generate ≥1 scenario
+   with scenario_type='vulnerable_customer' covering the FG21/1 Vulnerable Customer pathway.
+   Example: VulnerableCustomerIndicator__c=true must trigger the additional Consumer Duty
+   confirmation step before any recommendation is made. This is distinct from 'regulatory' —
+   it tests the specific VC flow, not just a general FCA obligation.
+   Set coverage_assessment.vulnerable_customer=True when this scenario is present.
 
 For LOW-FCA stories: regulatory scenario is optional. Focus on happy path + error path at minimum.
+For any FCA tier: if vulnerable_customer_impact=True, a vulnerable_customer scenario is mandatory.
 
 CRITICAL OUTPUT RULES — read before filling the tool schema:
 - ac_clauses: this is where EVERY scenario you write goes. Each entry is a full Gherkin object
@@ -261,7 +277,7 @@ async def run(state: StoryState) -> AgentResult:
 
     ac_clauses = extracted.get("ac_clauses", [])
     coverage = extracted.get("coverage_assessment", {})
-    generation_mode = extracted["generation_mode"]
+    generation_mode = extracted.get("generation_mode", "generated_from_scratch")
     fca_class = (agent3_data or {}).get("fca_classification", "UNCLASSIFIED")
     fca_clause_count = sum(1 for c in ac_clauses if c.get("fca_relevant"))
 
@@ -350,9 +366,9 @@ def _compute_confidence(
     else:
         scorer.add("clause_count", clause_count, -5)
 
-    # Signal 3: coverage breadth
+    # Signal 3: coverage breadth (5 fields: happy_path, error_paths, edge_cases, regulatory, vulnerable_customer)
     true_count = sum(1 for v in coverage.values() if v is True)
-    if true_count == 4:
+    if true_count >= 4:
         scorer.add("full_coverage", True, +10)
     elif true_count == 3:
         scorer.add("good_coverage", True, +5)
@@ -384,6 +400,15 @@ def _compute_confidence(
             scorer.add("cd_obligations_covered", len(cd_obligations), +5)
         elif cd_obligations and not has_regulatory_coverage:
             scorer.add("cd_obligations_uncovered", len(cd_obligations), -5)
+
+    # Signal 7: Vulnerable customer scenario coverage
+    if agent4_data:
+        vc_impact = agent4_data.get("vulnerable_customer_impact", False)
+        has_vc_scenario = coverage.get("vulnerable_customer", False)
+        if vc_impact and has_vc_scenario:
+            scorer.add("vulnerable_customer_scenario_present", True, +5)
+        elif vc_impact and not has_vc_scenario:
+            scorer.add("vulnerable_customer_scenario_missing", True, -8)
 
     scorer.cap(92).floor(20)
     return scorer.build()

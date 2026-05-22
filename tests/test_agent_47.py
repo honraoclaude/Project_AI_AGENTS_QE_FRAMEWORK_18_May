@@ -14,19 +14,22 @@ from src.core.schemas import initial_story_state
 
 AGENT5_FULL = {
     "ac_count": 4,
-    "acceptance_criteria": [
-        "AC1: Adviser can view client suitability score",
-        "AC2: Score refreshes on portfolio change",
-        "AC3: FCA suitability check runs on submit",
-        "AC4: Vulnerable customer flag shown",
+    "ac_clauses": [
+        {"description": "Adviser can view client suitability score", "scenario_type": "happy_path"},
+        {"description": "Score refreshes on portfolio change", "scenario_type": "happy_path"},
+        {"description": "FCA suitability check runs on submit", "scenario_type": "regulatory"},
+        {"description": "Vulnerable customer flag shown", "scenario_type": "regulatory"},
     ],
 }
 
-AGENT5_EMPTY = {"ac_count": 0, "acceptance_criteria": []}
+AGENT5_EMPTY = {"ac_count": 0, "ac_clauses": []}
 
 AGENT19_FULL = {
     "scenario_count": 5,
-    "scenarios": "Scenario: Happy path suitability check\nGiven ...\nWhen ...\nThen ...",
+    "gherkin_scenarios": [
+        {"title": "Happy path suitability check", "tags": ["@smoke"]},
+        {"title": "FCA suitability failure for HIGH-risk client", "tags": ["@fca"]},
+    ],
     "gherkin_verdict": "PASS",
 }
 
@@ -150,6 +153,54 @@ class TestAgentRun:
 
         assert result.model_used == "claude-sonnet-4-6"
 
+    async def test_ac_clauses_key_content_reaches_prompt(self):
+        """REQ-30 Bug 1: Agent 47 reads ac_clauses (not acceptance_criteria) from Agent 05."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": AGENT5_FULL}
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_COMPLETE
+            await run(state)
+
+        user_msg = mock_sonnet.call_args.kwargs.get("user_message", "")
+        assert "Adviser can view client suitability score" in user_msg, (
+            "AC descriptions from ac_clauses must appear in the prompt — not '(not available)'"
+        )
+
+    async def test_gherkin_scenarios_key_content_reaches_prompt(self):
+        """REQ-30 Bug 2: Agent 47 reads gherkin_scenarios (not scenarios) from Agent 19."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["19"] = {"data": AGENT19_FULL}
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_COMPLETE
+            await run(state)
+
+        user_msg = mock_sonnet.call_args.kwargs.get("user_message", "")
+        assert "Happy path suitability check" in user_msg or "FCA suitability" in user_msg, (
+            "Gherkin scenario titles from gherkin_scenarios must appear in the prompt"
+        )
+
+    async def test_old_wrong_keys_produce_not_available(self):
+        """REQ-30: Old keys acceptance_criteria/scenarios must not populate the prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": {
+            "acceptance_criteria": ["AC1: old key"],  # wrong key
+            "ac_count": 1,
+        }}
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_COMPLETE
+            await run(state)
+
+        user_msg = mock_sonnet.call_args.kwargs.get("user_message", "")
+        assert "AC1: old key" not in user_msg, (
+            "Old acceptance_criteria key should not be read"
+        )
+
     async def test_release_title_populated(self):
         state = initial_story_state("FSC-2417")
         state["agent_results"]["5"] = {"data": AGENT5_FULL}
@@ -160,3 +211,61 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.data["release_title"] == MOCK_NOTES_COMPLETE["release_title"]
+
+
+# ── REQ-30: new tests ─────────────────────────────────────────────────────────
+
+from src.agents.release.agent_47_release_notes_writer import _build_notes_message
+
+AGENT5_WITH_CLAUSES = {
+    "ac_count": 2,
+    "ac_clauses": [
+        {"description": "Adviser can view suitability score", "scenario_type": "happy_path"},
+        {"description": "FCA suitability check runs on submit", "scenario_type": "regulatory"},
+    ],
+}
+
+AGENT19_WITH_SCENARIOS = {
+    "scenario_count": 2,
+    "gherkin_scenarios": [
+        {"title": "Happy path suitability", "tags": ["@smoke"]},
+        {"title": "FCA regulatory check", "tags": ["@fca"]},
+    ],
+}
+
+AGENT3_HIGH = {"fca_classification": "HIGH"}
+AGENT3_LOW  = {"fca_classification": "LOW"}
+
+
+class TestREQ30AcClausesKeyFix:
+    def test_ac_clause_descriptions_appear_in_prompt(self):
+        msg = _build_notes_message("FSC-001", AGENT3_HIGH, AGENT5_WITH_CLAUSES, None, None, None)
+        assert "Adviser can view suitability score" in msg
+
+    def test_no_ac_clauses_gives_not_available(self):
+        msg = _build_notes_message("FSC-001", AGENT3_HIGH, {"ac_clauses": []}, None, None, None)
+        assert "(not available)" in msg
+
+
+class TestREQ30GherkinScenariosKeyFix:
+    def test_gherkin_scenario_titles_appear_in_prompt(self):
+        msg = _build_notes_message("FSC-001", AGENT3_HIGH, None, AGENT19_WITH_SCENARIOS, None, None)
+        assert "Happy path suitability" in msg
+
+    def test_no_gherkin_scenarios_gives_not_available(self):
+        msg = _build_notes_message("FSC-001", AGENT3_HIGH, None, {"gherkin_scenarios": []}, None, None)
+        assert "(not available)" in msg
+
+
+class TestREQ30FcaClassificationInPrompt:
+    def test_high_fca_classification_in_prompt(self):
+        msg = _build_notes_message("FSC-001", AGENT3_HIGH, None, None, None, None)
+        assert "HIGH" in msg
+
+    def test_low_fca_classification_in_prompt(self):
+        msg = _build_notes_message("FSC-001", AGENT3_LOW, None, None, None, None)
+        assert "LOW" in msg
+
+    def test_no_agent3_defaults_gracefully(self):
+        msg = _build_notes_message("FSC-001", None, None, None, None, None)
+        assert "FSC-001" in msg

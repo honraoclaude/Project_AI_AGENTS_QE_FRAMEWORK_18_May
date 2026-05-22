@@ -199,6 +199,45 @@ class TestAgentRun:
 
         assert result.model_used == "claude-haiku-4-5-20251001"
 
+    async def test_legacy_files_from_agent13_give_warn_or_fail(self):
+        """REQ-10: Agent 17 reads changed_files from Agent 13 — not always returns PASS."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {
+            "data": {
+                "changed_files": [
+                    {"file_path": "src/classes/LegacyApex.cls", "change_type": "modified"},
+                ],
+                "changed_files_count": 1,
+            }
+        }
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_WARN
+            result = await run(state)
+
+        assert result.data["sfdx_format_valid"] is False
+        assert result.data["sfdx_verdict"] in ("WARN", "FAIL")
+        assert len(result.data["invalid_files"]) >= 1
+
+    async def test_sfdx_files_from_agent13_give_pass(self):
+        """REQ-10: Agent 17 passes validation when Agent 13 changed_files are all SFDX format."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {
+            "data": {
+                "changed_files": SFDX_FILES,
+                "changed_files_count": len(SFDX_FILES),
+            }
+        }
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.data["sfdx_format_valid"] is True
+        assert result.data["sfdx_verdict"] == "PASS"
+
     async def test_migration_urgency_in_data(self):
         state = initial_story_state("FSC-2417")
 

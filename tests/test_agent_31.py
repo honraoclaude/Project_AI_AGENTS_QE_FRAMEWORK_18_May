@@ -168,3 +168,29 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-22: stub_mode in output ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestStubModeREQ22:
+    async def test_stub_mode_true_in_output(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_31_financial_data_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.data.get("stub_mode") is True
+
+    async def test_stub_mode_present_with_objects_in_scope(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": {"detected_objects": ["FinancialAccount"]}}
+
+        with patch("src.agents.testing.agent_31_financial_data_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.data.get("stub_mode") is True

@@ -256,3 +256,76 @@ class TestAgentRun:
 
         assert "signals" in result.data
         assert isinstance(result.data["signals"], dict)
+
+
+# ── REQ-32: new tests — fixed calibration_signals schema ─────────────────────
+
+MOCK_RETRO_FIXED_SCHEMA = {
+    "lessons_learned": [
+        {"area": "Coverage", "finding": "Good.", "recommendation": "Keep threshold at 85%."},
+    ],
+    "process_improvements": ["Add coverage check to CI"],
+    "calibration_signals": {
+        "coverage_above_threshold": True,
+        "defect_count": 0,
+        "fca_evidence_complete": True,
+        "development_verdict_clean": True,
+        "go_decision_reached": True,
+        "production_healthy": True,
+    },
+    "retrospective_verdict": "COMPLETE",
+    "narrative": "Release complete. All signals nominal.",
+}
+
+
+@pytest.mark.asyncio
+class TestREQ32CalibrationSignalsSchema:
+    async def test_calibration_signals_has_required_keys(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["23"] = {"data": AGENT23_DATA}
+        state["agent_results"]["33"] = {"data": AGENT33_DATA}
+        state["agent_results"]["45"] = {"data": AGENT45_DATA}
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_FIXED_SCHEMA
+            result = await run(state)
+
+        sigs = result.data["calibration_signals"]
+        for key in ["coverage_above_threshold", "defect_count", "fca_evidence_complete",
+                    "development_verdict_clean", "go_decision_reached", "production_healthy"]:
+            assert key in sigs, f"Missing required calibration signal key: {key}"
+
+    async def test_coverage_above_threshold_is_bool(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_FIXED_SCHEMA
+            result = await run(state)
+
+        assert isinstance(result.data["calibration_signals"]["coverage_above_threshold"], bool)
+
+    async def test_defect_count_is_int(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_FIXED_SCHEMA
+            result = await run(state)
+
+        assert isinstance(result.data["calibration_signals"]["defect_count"], int)
+
+    async def test_fca_evidence_complete_when_evidence_verdict_complete(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["44"] = {"data": {"evidence_verdict": "COMPLETE"}}
+
+        retro_with_evidence = {**MOCK_RETRO_FIXED_SCHEMA,
+                               "calibration_signals": {**MOCK_RETRO_FIXED_SCHEMA["calibration_signals"],
+                                                       "fca_evidence_complete": True}}
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = retro_with_evidence
+            result = await run(state)
+
+        assert result.data["calibration_signals"]["fca_evidence_complete"] is True

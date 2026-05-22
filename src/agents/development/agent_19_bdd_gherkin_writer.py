@@ -39,7 +39,10 @@ AGENT_NAME = "BDD Gherkin Writer"
 _GHERKIN_TOOL_NAME = "generate_gherkin_scenarios"
 _GHERKIN_TOOL_SCHEMA = {
     "type": "object",
-    "required": ["scenarios", "scenario_count", "gherkin_verdict", "fca_coverage_present", "coverage_gaps"],
+    "required": [
+        "scenarios", "scenario_count", "gherkin_verdict",
+        "fca_coverage_present", "vulnerable_customer_coverage_present", "coverage_gaps",
+    ],
     "properties": {
         "scenarios": {
             "type": "array",
@@ -52,7 +55,7 @@ _GHERKIN_TOOL_SCHEMA = {
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Tags e.g. @fca, @negative, @boundary, @smoke",
+                        "description": "Tags e.g. @fca, @negative, @boundary, @smoke, @vulnerable_customer, @bulk",
                     },
                     "steps": {
                         "type": "array",
@@ -79,6 +82,15 @@ _GHERKIN_TOOL_SCHEMA = {
             "type": "boolean",
             "description": "True if negative/boundary FCA test scenarios are included.",
         },
+        "vulnerable_customer_coverage_present": {
+            "type": "boolean",
+            "description": (
+                "True if at least one scenario tagged @vulnerable_customer is present. "
+                "Must be True when vulnerable_customer_impact=True from Agent 04. "
+                "A story with vulnerable_customer_impact=True but no @vulnerable_customer "
+                "scenario should receive gherkin_verdict=PARTIAL, not PASS."
+            ),
+        },
         "coverage_gaps": {
             "type": "array",
             "items": {"type": "string"},
@@ -99,11 +111,19 @@ Rules:
 3. Use FSC domain terminology: Suitability, Risk Profile, Financial Account, Goal,
    Financial Holding, Vulnerable Customer, Consumer Duty.
 4. Tag scenarios: @smoke (happy path), @regression, @fca (regulatory), @negative,
-   @boundary as appropriate.
+   @boundary, @vulnerable_customer, @bulk as appropriate.
 5. Steps must be concrete and testable — no vague language like "the system works correctly".
 6. Use data tables or Examples where multiple input variations apply.
 7. If ACs are ambiguous or missing, note the gap in coverage_gaps and set verdict PARTIAL.
 8. If no ACs are available at all, set verdict INCOMPLETE.
+9. Vulnerable Customer: when vulnerable_customer_impact=True, generate at least one scenario
+   tagged @vulnerable_customer covering the FG21/1 pathway. Do not rely on AC text alone —
+   the vulnerable customer obligation is mandatory regardless of how ACs are worded.
+   A story with vulnerable_customer_impact=True but no @vulnerable_customer scenario must
+   have gherkin_verdict=PARTIAL and set vulnerable_customer_coverage_present=False.
+10. Bulk risk: when bulk_risk_level=HIGH, generate at least one scenario tagged @bulk
+    covering the specified bulk risk factors (e.g. DML governor limits, large data volumes,
+    Queueable Apex async patterns). Include volume numbers in the scenario steps.
 """.strip()
 
 
@@ -112,9 +132,11 @@ Rules:
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent3_data, agent3_conf = get_agent_result(state, "3")
+    agent4_data = _get_agent_data(state, "4")
     agent5_data, agent5_conf = get_agent_result(state, "5")
     agent10_data = _get_agent_data(state, "10")
     agent13_data, agent13_conf = get_agent_result(state, "13")
+    agent16_data = _get_agent_data(state, "16")
 
     story = await get_story(story_id)
     acs = await get_acceptance_criteria(story_id)
@@ -124,6 +146,9 @@ async def run(state: StoryState) -> AgentResult:
     refined_ac_count = (agent5_data or {}).get("ac_clause_count", 0)
     compliance_verdict = (agent10_data or {}).get("coverage_verdict", "")
     objects_in_scope = (agent13_data or {}).get("detected_objects", [])
+    vulnerable_customer_impact = (agent4_data or {}).get("vulnerable_customer_impact", False)
+    bulk_risk_level = (agent16_data or {}).get("bulk_risk_level", "LOW")
+    bulk_risk_factors = (agent16_data or {}).get("bulk_risk_factors", [])
 
     user_message = _build_prompt(
         story_id=story_id,
@@ -133,6 +158,9 @@ async def run(state: StoryState) -> AgentResult:
         refined_ac_count=refined_ac_count,
         compliance_verdict=compliance_verdict,
         objects_in_scope=objects_in_scope,
+        vulnerable_customer_impact=vulnerable_customer_impact,
+        bulk_risk_level=bulk_risk_level,
+        bulk_risk_factors=bulk_risk_factors,
     )
 
     result = await call_with_tool(
@@ -149,7 +177,9 @@ async def run(state: StoryState) -> AgentResult:
     scenario_count = result.get("scenario_count", len(scenarios))
     verdict = result.get("gherkin_verdict", "INCOMPLETE")
     fca_coverage = result.get("fca_coverage_present", False)
+    vc_coverage = result.get("vulnerable_customer_coverage_present", False)
     gaps = result.get("coverage_gaps", [])
+    bulk_test_scenarios_generated = any("@bulk" in tag for s in scenarios for tag in s.get("tags", []))
 
     # Coalition Shapley: 3 sources contribute to scenario generation
     agent5_trust = (agent5_data or {}).get("generation_mode_trust", 0.8)
@@ -180,6 +210,8 @@ async def run(state: StoryState) -> AgentResult:
         "scenario_count": scenario_count,
         "gherkin_verdict": verdict,
         "fca_coverage_present": fca_coverage,
+        "vulnerable_customer_coverage_present": vc_coverage,
+        "bulk_test_scenarios_generated": bulk_test_scenarios_generated,
         "coverage_gaps": gaps,
         "ac_count": ac_count,
         "shapley_attribution": shapley,
@@ -253,15 +285,34 @@ def _build_prompt(
     refined_ac_count: int,
     compliance_verdict: str,
     objects_in_scope: list,
+    vulnerable_customer_impact: bool = False,
+    bulk_risk_level: str = "LOW",
+    bulk_risk_factors: list | None = None,
 ) -> str:
     ac_text = "\n".join(
         f"  AC{i+1}: {ac.get('description', str(ac))}" for i, ac in enumerate(acs)
     ) or "  (no acceptance criteria available)"
 
+    vc_line = (
+        "Vulnerable Customer Impact: TRUE — generate ≥1 scenario tagged @vulnerable_customer (FG21/1 mandatory)"
+        if vulnerable_customer_impact
+        else "Vulnerable Customer Impact: FALSE"
+    )
+
+    bulk_factors_text = ", ".join(bulk_risk_factors or []) or "none"
+    bulk_line = (
+        f"Bulk Risk Level: {bulk_risk_level} — generate ≥1 scenario tagged @bulk "
+        f"covering: {bulk_factors_text}"
+        if bulk_risk_level == "HIGH"
+        else f"Bulk Risk Level: {bulk_risk_level}"
+    )
+
     return (
         f"Story ID: {story_id}\n"
         f"Title: {story.get('summary', 'N/A')}\n"
         f"FCA Classification: {fca_class}\n"
+        f"{vc_line}\n"
+        f"{bulk_line}\n"
         f"Acceptance Criteria ({len(acs)} present, {refined_ac_count} expected from refinement):\n"
         f"{ac_text}\n"
         f"AC Compliance Verdict: {compliance_verdict or 'N/A'}\n"

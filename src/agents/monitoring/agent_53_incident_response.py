@@ -36,6 +36,11 @@ from src.agents.base import TierBScorer, build_system, call_with_tool
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 
+try:
+    from src.mcp.qds_mcp import server as qds  # not available in unit test environments
+except Exception:
+    qds = None  # type: ignore[assignment]
+
 AGENT_ID = 53
 AGENT_NAME = "Incident Response Agent"
 
@@ -112,14 +117,17 @@ advice, or financial account data — the Compliance Officer must always be noti
 async def run(state: StoryState) -> AgentResult:
     """Called by the Fleet Commander worker when dispatched within a pipeline."""
     story_id = state["story_id"]
+    agent3_data  = _get_agent_data(state, "3")
     agent48_data = _get_agent_data(state, "48")
     agent49_data = _get_agent_data(state, "49")
     agent51_data = _get_agent_data(state, "51")
 
+    fca_class = (agent3_data or {}).get("fca_classification", "UNKNOWN")
+
     incident_context = _build_incident_context(
-        story_id, agent48_data, agent49_data, agent51_data,
+        story_id, agent48_data, agent49_data, agent51_data, fca_class,
     )
-    return await _run_triage(story_id, incident_context)
+    return await _run_triage(story_id, incident_context, fca_class)
 
 
 async def run_incident(
@@ -129,6 +137,7 @@ async def run_incident(
     error_details: str,
     health_snapshot: dict | None = None,
     rollback_feasible: bool = True,
+    fca_classification: str = "UNKNOWN",
 ) -> AgentResult:
     """
     Direct entry point for webhook-triggered incidents.
@@ -136,6 +145,7 @@ async def run_incident(
     """
     context = (
         f"Story/Release: {story_id}\n"
+        f"FCA Classification: {fca_classification}\n"
         f"Incident type: {incident_type}\n"
         f"Severity hint: {severity_hint}\n"
         f"Error details: {error_details}\n"
@@ -143,24 +153,28 @@ async def run_incident(
         f"Health snapshot: {health_snapshot or 'not available'}\n\n"
         f"Triage this incident using the {_INCIDENT_TOOL_NAME} tool."
     )
-    return await _run_triage(story_id, context)
+    return await _run_triage(story_id, context, fca_classification)
 
 
 # ── Triage execution ──────────────────────────────────────────────────────────
 
-async def _run_triage(story_id: str, incident_context: str) -> AgentResult:
+async def _run_triage(story_id: str, incident_context: str, fca_class: str = "UNKNOWN") -> AgentResult:
     result_data = await _call_sonnet(incident_context)
 
     severity = result_data.get("incident_severity", "P2")
     rollback = result_data.get("rollback_recommended", False)
     steps = result_data.get("triage_steps", [])
-    escalate = result_data.get("escalate_to", [])
+    escalate = list(result_data.get("escalate_to", []))
     resolution = result_data.get("estimated_resolution", "unknown")
     verdict = result_data.get("incident_verdict", "MONITORING")
     narrative = result_data.get("narrative", "Incident response complete.")
 
+    # REQ-34 Gap 1: CO escalation is mandatory for HIGH/MEDIUM FCA stories
+    if fca_class in ("HIGH", "MEDIUM") and "CO" not in escalate:
+        escalate.append("CO")
+
     confidence_score, signals = _compute_confidence(severity, len(steps))
-    escalated = confidence_score < settings.confidence_escalation_threshold
+    escalated_flag = confidence_score < settings.confidence_escalation_threshold
 
     data: dict[str, Any] = {
         "incident_severity": severity,
@@ -173,7 +187,7 @@ async def _run_triage(story_id: str, incident_context: str) -> AgentResult:
         "signals": signals,
     }
 
-    return AgentResult(
+    result = AgentResult(
         agent_id=AGENT_ID,
         agent_name=AGENT_NAME,
         what=f"Incident response for {story_id}: severity={severity} — verdict={verdict}",
@@ -185,10 +199,35 @@ async def _run_triage(story_id: str, incident_context: str) -> AgentResult:
             calibration_multiplier=1.0,
             final_score=confidence_score,
             signals=signals,
-            escalated=escalated,
+            escalated=escalated_flag,
         ),
         model_used=settings.default_model,
     )
+
+    # REQ-34 Gap 2: emit to FCA audit ledger for every production incident
+    if qds is not None:
+        try:
+            await qds.emit_decision_event(
+                event_type="INCIDENT",
+                story_id=story_id,
+                agent_id=AGENT_ID,
+                gate_id="PRODUCTION",
+                what=result.what,
+                why=narrative,
+                data={
+                    "incident_severity": severity,
+                    "rollback_recommended": rollback,
+                    "escalate_to": escalate,
+                    "incident_verdict": verdict,
+                },
+                confidence_tier="B",
+                final_score=confidence_score,
+                actor_email="system",
+            )
+        except Exception:
+            pass  # audit ledger unavailable must not block incident response
+
+    return result
 
 
 # ── Confidence scoring ────────────────────────────────────────────────────────
@@ -230,6 +269,7 @@ def _build_incident_context(
     agent48_data: dict | None,
     agent49_data: dict | None,
     agent51_data: dict | None,
+    fca_classification: str = "UNKNOWN",
 ) -> str:
     rollback_feasible = (agent48_data or {}).get("rollback_feasible", True)
     rollback_risk = (agent48_data or {}).get("rollback_risk", "UNKNOWN")
@@ -240,6 +280,7 @@ def _build_incident_context(
 
     return (
         f"Story: {story_id}\n"
+        f"FCA Classification: {fca_classification}\n"
         f"Post-release health: {health_status} (monitor verdict: {monitor_verdict})\n"
         f"Alerts triggered: {alerts or ['none']}\n"
         f"Rollback feasible: {rollback_feasible}, risk: {rollback_risk}\n"

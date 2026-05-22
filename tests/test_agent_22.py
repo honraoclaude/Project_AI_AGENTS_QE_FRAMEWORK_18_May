@@ -42,7 +42,7 @@ AGENT13_CLEAN = {
 AGENT13_SCOPE_DRIFT = {
     "detected_objects": ["suitability__c", "riskprofile__c", "financialaccount"],
     "dependency_depth": 2,
-    "scope_delta": ["riskprofile__c", "financialaccount"],
+    "scope_delta_objects": ["riskprofile__c", "financialaccount"],
 }
 
 AGENT17_PASS = {
@@ -122,6 +122,26 @@ class TestSandboxStateAssessment:
         )
         assert ready is False
         assert score < 70
+
+    def test_scope_delta_objects_key_triggers_blocker(self):
+        """REQ-14: Agent 22 reads scope_delta_objects (not scope_delta)."""
+        agent13_with_new_key = {
+            "detected_objects": ["suitability__c", "riskprofile__c", "financialaccount"],
+            "dependency_depth": 2,
+            "scope_delta_objects": ["riskprofile__c", "financialaccount"],
+        }
+        _, blockers, _, _ = _assess_sandbox_state(AGENT11_GOOD, agent13_with_new_key, AGENT17_PASS)
+        assert any("scope" in b.lower() or "metadata" in b.lower() for b in blockers)
+
+    def test_old_scope_delta_key_not_read(self):
+        """REQ-14: Agent 22 must not read the old 'scope_delta' key — only scope_delta_objects."""
+        agent13_old_key = {
+            "detected_objects": ["suitability__c", "riskprofile__c"],
+            "dependency_depth": 1,
+            "scope_delta": ["riskprofile__c"],  # old key — must be ignored
+        }
+        _, blockers, ready, _ = _assess_sandbox_state(AGENT11_GOOD, agent13_old_key, AGENT17_PASS)
+        assert ready is True  # no scope blocker because old key is not read
 
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────

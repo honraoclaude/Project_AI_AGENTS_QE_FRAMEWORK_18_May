@@ -300,3 +300,106 @@ class TestEnsembleAndTA:
             result = await run(state)
 
         assert result.data["ensemble_agreement"] is True
+
+    async def test_ensemble_agreement_uses_call_a_result(self):
+        """REQ-21 Bug 2: when ensemble_agreement=True, call_a (permissive) result is used."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+
+        # call_a returns WARN (1 scenario), call_b returns PASS (2 scenarios)
+        # When they agree → call_a should be used (both return PASS → agreement → call_a)
+        # Use side_effect to return different values: first call=call_a, second=call_b
+        # Both return same verdict (PASS) so they agree — result should be call_a (1 scenario)
+        call_a_result = {**MOCK_FCA_PASS, "fca_test_scenarios": [MOCK_FCA_PASS["fca_test_scenarios"][0]]}
+        call_b_result = MOCK_FCA_PASS  # 2 scenarios
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.side_effect = [call_a_result, call_b_result]
+            result = await run(state)
+
+        assert result.data["ensemble_agreement"] is True
+        # call_a scenario count (1) should be used, not call_b (2)
+        assert result.data["fca_scenario_count"] == result.data["call_a_scenario_count"]
+
+    async def test_prompt_ends_with_tool_instruction_when_no_existing_scenarios(self):
+        """REQ-21 Bug 1: prompt must end with tool instruction even when no existing scenarios."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        # No agent_results["19"] → no existing Gherkin scenarios → existing_titles is empty
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            await run(state)
+
+        # Both calls should have the tool instruction
+        for call in mock_sonnet.call_args_list:
+            user_msg = call.kwargs.get("user_message", "")
+            assert "generate" in user_msg.lower() or "tool" in user_msg.lower(), (
+                "Prompt must include tool instruction regardless of existing scenarios"
+            )
+
+
+# ── REQ-21 Bug 3: vulnerable_customer_impact wired into prompt ────────────────
+
+AGENT4_WITH_VC = {
+    "consumer_duty_risk": "HIGH",
+    "consumer_duty_verdict": "REVIEW_REQUIRED",
+    "vulnerable_customer_impact": True,
+}
+
+AGENT4_WITHOUT_VC = {
+    "consumer_duty_risk": "HIGH",
+    "consumer_duty_verdict": "REVIEW_REQUIRED",
+    "vulnerable_customer_impact": False,
+}
+
+
+@pytest.mark.asyncio
+class TestVulnerableCustomerImpactREQ21:
+    async def test_vc_impact_true_included_in_prompt(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["4"] = {"data": AGENT4_WITH_VC}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            await run(state)
+
+        first_call_msg = mock_sonnet.call_args_list[0].kwargs.get("user_message", "")
+        assert "TRUE" in first_call_msg or "FG21/1" in first_call_msg
+
+    async def test_vc_impact_false_not_mandatory(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["4"] = {"data": AGENT4_WITHOUT_VC}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            await run(state)
+
+        first_call_msg = mock_sonnet.call_args_list[0].kwargs.get("user_message", "")
+        assert "FALSE" in first_call_msg or "Vulnerable Customer Impact: FALSE" in first_call_msg

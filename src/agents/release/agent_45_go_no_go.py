@@ -68,6 +68,7 @@ what passed and what (if anything) is blocking production deployment.
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent3_data  = _get_agent_data(state, "3")
     agent36_data = _get_agent_data(state, "36")
     agent39_data = _get_agent_data(state, "39")
     agent41_data = _get_agent_data(state, "41")
@@ -75,7 +76,7 @@ async def run(state: StoryState) -> AgentResult:
     agent44_data = _get_agent_data(state, "44")
 
     go, reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent = _make_decision(
-        agent36_data, agent39_data, agent41_data, agent43_data, agent44_data,
+        agent3_data, agent36_data, agent39_data, agent41_data, agent43_data, agent44_data,
     )
 
     trace_msg = _build_trace_message(story_id, go, reasons, verdict)
@@ -125,15 +126,17 @@ async def run(state: StoryState) -> AgentResult:
 # ── Deterministic go/no-go logic ──────────────────────────────────────────────
 
 _GATE_LOSS_MAP = {
-    "readiness_blocked":    {"loss_type": "FCA_AUDIT_FAILURE",   "severity": "CRITICAL"},
-    "integrity_failed":     {"loss_type": "METADATA_CORRUPTION", "severity": "HIGH"},
-    "smoke_failed":         {"loss_type": "PRODUCTION_INCIDENT", "severity": "CRITICAL"},
-    "fca_evidence_missing": {"loss_type": "REGULATORY_BREACH",   "severity": "CRITICAL"},
-    "uat_pending":          {"loss_type": "STAKEHOLDER_SIGN_OFF","severity": "MEDIUM"},
+    "readiness_blocked":      {"loss_type": "FCA_AUDIT_FAILURE",   "severity": "CRITICAL"},
+    "integrity_failed":       {"loss_type": "METADATA_CORRUPTION", "severity": "HIGH"},
+    "smoke_failed":           {"loss_type": "PRODUCTION_INCIDENT", "severity": "CRITICAL"},
+    "fca_evidence_missing":   {"loss_type": "REGULATORY_BREACH",   "severity": "CRITICAL"},
+    "fca_evidence_partial":   {"loss_type": "REGULATORY_GAP",      "severity": "HIGH"},
+    "uat_pending":            {"loss_type": "STAKEHOLDER_SIGN_OFF", "severity": "MEDIUM"},
 }
 
 
 def _make_decision(
+    agent3_data: dict | None,
     agent36_data: dict | None,
     agent39_data: dict | None,
     agent41_data: dict | None,
@@ -143,6 +146,8 @@ def _make_decision(
     """Returns (go_decision, no_go_reasons, verdict, minimax_loss, coalition_verdict, coalition_dissent)."""
     reasons: list[str] = []
     loss_keys: list[str] = []
+
+    fca_class = (agent3_data or {}).get("fca_classification", "LOW")
 
     readiness_verdict = (agent39_data or {}).get("readiness_verdict", "READY")
     if readiness_verdict == "BLOCKED":
@@ -167,6 +172,11 @@ def _make_decision(
         gaps = (agent44_data or {}).get("evidence_gaps", [])
         reasons.append(f"FCA evidence MISSING: {gaps}")
         loss_keys.append("fca_evidence_missing")
+    elif evidence_verdict == "PARTIAL" and fca_class in ("HIGH", "MEDIUM"):
+        # REQ-29 Gap 1: PARTIAL evidence is a NO_GO for HIGH/MEDIUM FCA stories
+        gaps = (agent44_data or {}).get("evidence_gaps", [])
+        reasons.append(f"FCA evidence PARTIAL for {fca_class}-FCA story: {gaps}")
+        loss_keys.append("fca_evidence_partial")
 
     uat_coord = (agent36_data or {}).get("uat_coordination_verdict", "NOT_REQUIRED")
     if uat_coord == "BLOCKED":
@@ -190,6 +200,7 @@ def _make_decision(
     ]
 
     # Coalition: all 5 sources must agree for unanimous GO
+    # REQ-29 Gap 3: PENDING removed from UAT pass set — outstanding CO means sign-off not yet achieved
     coalition_inputs = {
         "readiness":  readiness_verdict,
         "integrity":  integrity_verdict,
@@ -198,8 +209,11 @@ def _make_decision(
         "uat":        uat_coord,
     }
     coalition_passes = {
-        k: v in ("READY", "PASS", "COMPLETE", "GO", "NOT_REQUIRED", "SIGNED_OFF", "PENDING")
-        for k, v in coalition_inputs.items()
+        "readiness":  readiness_verdict in ("READY", "PARTIAL"),
+        "integrity":  integrity_verdict in ("PASS", "WARN"),
+        "smoke":      smoke_verdict in ("PASS", "SKIPPED"),
+        "evidence":   evidence_verdict in ("COMPLETE", "PARTIAL"),
+        "uat":        uat_coord in ("NOT_REQUIRED", "SIGNED_OFF"),  # PENDING removed
     }
     coalition_unanimous = all(coalition_passes.values())
     coalition_verdict = "UNANIMOUS_GO" if coalition_unanimous else "DISSENT_NO_GO"

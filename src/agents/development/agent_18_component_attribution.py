@@ -103,7 +103,7 @@ async def run(state: StoryState) -> AgentResult:
     changed_files = _get_changed_files(agent13_data)
 
     # ── Deterministic analysis ────────────────────────────────────────────────
-    components, regulated, merge_risk, verdict = _analyse_components(changed_files)
+    components, regulated, merge_risk, verdict, author_data_available = _analyse_components(changed_files)
 
     # ── Haiku trace ───────────────────────────────────────────────────────────
     trace_message = _build_trace_message(
@@ -112,7 +112,7 @@ async def run(state: StoryState) -> AgentResult:
     trace = await _generate_trace(trace_message)
 
     confidence_score, signals = _compute_confidence(
-        changed_files, agent11_data, agent13_data, regulated, merge_risk,
+        changed_files, agent11_data, agent13_data, regulated, merge_risk, author_data_available,
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
 
@@ -131,6 +131,7 @@ async def run(state: StoryState) -> AgentResult:
         "merge_risk_components": merge_risk,
         "component_verdict": verdict,
         "total_components": len(components),
+        "author_data_available": author_data_available,
         "attribution_concern": trace.get("attribution_concern", "none"),
         "narrative": trace.get("narrative", ""),
         "signals": signals,
@@ -158,21 +159,23 @@ async def run(state: StoryState) -> AgentResult:
 
 def _analyse_components(
     changed_files: list[dict],
-) -> tuple[list[dict], list[str], list[str], str]:
+) -> tuple[list[dict], list[str], list[str], str, bool]:
     """
     Map file paths to Salesforce components. Returns:
-    (components, regulated_names, merge_risk_names, verdict).
+    (components, regulated_names, merge_risk_names, verdict, author_data_available).
     """
     if not changed_files:
-        return [], [], [], "PASS"
+        return [], [], [], "PASS", False
 
     components: list[dict] = []
-    author_to_components: dict[str, list[str]] = {}
     component_to_authors: dict[str, list[str]] = {}
+    files_with_author = 0
 
     for f in changed_files:
         path = f.get("file_path", "")
         author = f.get("author_email", "")
+        if author:
+            files_with_author += 1
         name = _extract_component_name(path)
         ctype = _infer_component_type(path)
 
@@ -191,10 +194,17 @@ def _analyse_components(
             if author and author not in component_to_authors[name]:
                 component_to_authors[name].append(author)
 
+    author_data_available = files_with_author >= 1
     regulated = [c["name"] for c in components if c["is_regulated"] and c["name"]]
     merge_risk = [
         name for name, authors in component_to_authors.items() if len(authors) > 1
     ]
+
+    flags: list[str] = []
+    if not author_data_available:
+        flags.append(
+            "Author data unavailable from Copado — merge risk detection not possible for this story"
+        )
 
     if regulated and merge_risk:
         verdict = "REVIEW_REQUIRED"
@@ -205,7 +215,7 @@ def _analyse_components(
     else:
         verdict = "PASS"
 
-    return components, list(set(regulated)), merge_risk, verdict
+    return components, list(set(regulated)), merge_risk, verdict, author_data_available
 
 
 def _extract_component_name(path: str) -> str:
@@ -250,6 +260,7 @@ def _compute_confidence(
     agent13_data: dict | None,
     regulated: list[str],
     merge_risk: list[str],
+    author_data_available: bool = True,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=62)
 
@@ -271,6 +282,9 @@ def _compute_confidence(
 
     if merge_risk:
         scorer.add("merge_risk_detected", len(merge_risk), -5)
+
+    if changed_files and not author_data_available:
+        scorer.add("author_data_unavailable", True, -5)
 
     scorer.cap(92).floor(20)
     return scorer.build()

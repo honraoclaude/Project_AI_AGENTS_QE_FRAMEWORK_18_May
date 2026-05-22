@@ -29,6 +29,8 @@ PHASE_ORDER = ["Refinement", "Development", "Testing", "Release", "Monitoring"]
 VERDICT_COLOUR = {
     "PASS": "green", "GO": "green", "COMPLETE": "green", "HEALTHY": "green",
     "READY": "green", "SIGNED_OFF": "green", "FEASIBLE": "green",
+    # Agent 45 coalition verdicts (Wave 5 game theory)
+    "UNANIMOUS_GO": "green", "DISSENT_NO_GO": "red",
     "WARN": "amber", "PARTIAL": "amber", "CONDITIONAL": "amber", "PENDING": "amber",
     "FAIL": "red", "NO_GO": "red", "BLOCKED": "red", "MISSING": "red", "CRITICAL": "red",
     "SKIPPED": "gray", "UNKNOWN": "gray", "—": "gray",
@@ -106,6 +108,7 @@ def _load_story(story_dir: Path) -> dict | None:
     a45 = _load_agent_json(story_dir, 45).get("data", {})
     a54_full = _load_agent_json(story_dir, 54)
     a54 = a54_full.get("data", {})
+    a55 = _load_agent_json(story_dir, 55).get("data", {})
 
     # Phase confidence breakdown — load all agent files
     phase_scores: dict[str, list[float]] = {p: [] for p in PHASE_ORDER}
@@ -176,15 +179,20 @@ def _load_story(story_dir: Path) -> dict | None:
         # Agent 44 — FCA Evidence
         "evidence_verdict": a44.get("evidence_verdict"),
         "regulatory_sign_off_ready": a44.get("regulatory_sign_off_ready"),
-        # Agent 45 — Go/No-Go
+        # Agent 45 — Go/No-Go + coalition (Wave 5 game theory)
         "go_decision": a45.get("go_decision"),
         "coordinator_verdict": a45.get("coordinator_verdict"),
         "no_go_reasons": a45.get("no_go_reasons", []),
+        "coalition_verdict": a45.get("coalition_verdict"),
+        "coalition_dissent": a45.get("coalition_dissent", []),
         # Agent 54 — AC Challenger
         "ac_challenged": a54.get("ac_count_challenged"),
         "survivor_count": a54.get("survivor_count"),
         "critical_weakness_count": a54.get("critical_weakness_count"),
         "challenge_summary": a54.get("challenge_summary"),
+        # Agent 55 — 3 Amigos Facilitator
+        "story_ready_assessment": a55.get("story_ready_assessment"),
+        "open_questions_count": len(a55.get("open_questions", [])),
         # Phase breakdown
         "phase_confidence": phase_confidence,
         "report_exists": report_exists,
@@ -251,6 +259,13 @@ def _render_story_row(s: dict, idx: int) -> str:
     gng = s.get("coordinator_verdict") or "—"
     gng_col = _verdict_colour(gng)
 
+    coalition = s.get("coalition_verdict") or ""
+    coalition_suffix = ""
+    if coalition:
+        col_col = _verdict_colour(coalition)
+        short = "✓ UNANIMOUS" if coalition == "UNANIMOUS_GO" else "✗ DISSENT"
+        coalition_suffix = f' <span class="chip chip-{col_col}" style="font-size:9px">{short}</span>'
+
     report_link = (
         f'<a href="{_escape(s["report_filename"])}" class="report-link">Open →</a>'
         if s["report_exists"]
@@ -267,7 +282,7 @@ def _render_story_row(s: dict, idx: int) -> str:
         <td>{_chip(risk, risk_col)}</td>
         <td><span class="chip chip-{cov_col}">{cov_cell}</span></td>
         <td>{_chip(evidence, ev_col)}</td>
-        <td>{_chip(gng, gng_col)}</td>
+        <td>{_chip(gng, gng_col)}{coalition_suffix}</td>
         <td style="color:#718096;font-size:12px">{_escape(s["elapsed_str"])}</td>
         <td onclick="event.stopPropagation()">{report_link}</td>
       </tr>
@@ -291,13 +306,17 @@ def _render_accordion_body(s: dict, idx: int) -> str:
             {_mini_bar(conf, 90)}
           </div>"""
 
-    # Top risks
+    # Top risks + coalition dissent
     actions = s.get("recommended_actions", [])[:3]
     risk_items = ""
     for action in actions:
         severity = "critical" if "[BLOCKING" in action else "high" if "[HIGH" in action else "medium"
         short = _escape(action[:200] + ("…" if len(action) > 200 else ""))
         risk_items += f'<div class="mini-risk mini-risk-{severity}">{short}</div>'
+    coalition_dissent = s.get("coalition_dissent", [])
+    if coalition_dissent:
+        dissent_str = _escape(", ".join(coalition_dissent))
+        risk_items += f'<div class="mini-risk mini-risk-critical">Coalition dissent: {dissent_str}</div>'
     if not risk_items:
         risk_items = '<div style="color:#a0aec0;font-size:12px">No risk data available</div>'
 
@@ -338,6 +357,16 @@ def _render_accordion_body(s: dict, idx: int) -> str:
     else:
         shapley_html = '<div style="color:#a0aec0;font-size:12px">No Shapley data</div>'
 
+    # 3 Amigos readiness
+    ready_assessment = s.get("story_ready_assessment") or "—"
+    open_q_count = s.get("open_questions_count", 0)
+    ready_col = _verdict_colour(ready_assessment)
+    amigos_html = f"""
+          <div class="acc-mini-grid">
+            <div class="acc-mini-cell"><div class="acc-mini-val"><span class="chip chip-{ready_col}">{_escape(ready_assessment)}</span></div><div class="acc-mini-lbl">Story Ready Assessment</div></div>
+            <div class="acc-mini-cell"><div class="acc-mini-val">{open_q_count}</div><div class="acc-mini-lbl">Open Questions</div></div>
+          </div>"""
+
     return f"""
       <div class="accordion-body">
         <div class="acc-grid">
@@ -352,6 +381,10 @@ def _render_accordion_body(s: dict, idx: int) -> str:
           <div class="acc-section">
             <div class="acc-section-title">AC Challenger (Agent 54)</div>
             {challenger_html}
+          </div>
+          <div class="acc-section">
+            <div class="acc-section-title">3 Amigos Facilitator (Agent 55)</div>
+            {amigos_html}
           </div>
           <div class="acc-section">
             <div class="acc-section-title">Shapley Attribution (Agent 09)</div>
@@ -581,7 +614,7 @@ table.story-table{{width:100%;border-collapse:collapse;font-size:12px}}
   </div>
   <div class="header-pills">
     <span class="pill">Generated: <strong>{gen_str}</strong></span>
-    <span class="pill">Agents: <strong>54 per story</strong></span>
+    <span class="pill">Agents: <strong>55 per story</strong></span>
     <span class="pill">Framework: <strong>PACT + Game Theory</strong></span>
   </div>
 </div>

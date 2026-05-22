@@ -146,11 +146,14 @@ def _simulate_execution(
     if not test_cases or design_verdict == "INCOMPLETE":
         return [], 0, 0, 0, "SKIPPED"
 
-    # Stub: simulate all tests pass (production would call Copado API)
+    # Stub: simulate all tests pass (production: call Copado CRT REST API).
+    # When replacing stub: map Copado `selfHealingApplied` → `self_healed` per result.
+    # `smoke_verdict=FAIL` also becomes reachable when real execution replaces this stub.
     results = [
         {
             "test_id": tc.get("test_id", f"CRT-{i+1:03d}"),
             "title": tc.get("title", ""),
+            "tags": tc.get("tags", []),   # carry tags forward for Agent 28 FCA detection
             "status": "PASSED",
             "duration_ms": 1200,
             "error_message": None,

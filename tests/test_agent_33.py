@@ -59,46 +59,46 @@ MOCK_TRACE_WARN = {
 class TestAnalyseCoverage:
     def test_full_coverage_all_sources_gives_pass(self):
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_LOW, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
             AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
         )
         assert verdict == "PASS"
 
     def test_no_data_gives_zero_pct(self):
-        pct, _, _, _ = _analyse_coverage(None, None, None, None, None, None, None)
+        pct, _, _, _ = _analyse_coverage(None, None, None, None, None, None, None, None)
         assert pct == 0.0
 
     def test_no_data_fails_low_threshold(self):
-        _, _, _, verdict = _analyse_coverage(None, None, None, None, None, None, None)
+        _, _, _, verdict = _analyse_coverage(None, None, None, None, None, None, None, None)
         assert verdict == "FAIL"
 
     def test_five_gherkin_scenarios_contributes_100_pct(self):
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, None, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_FIVE, None, None, None, None,
         )
         assert pct == 100.0
 
     def test_three_gherkin_scenarios_contributes_60_pct(self):
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_THREE, None, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_THREE, None, None, None, None,
         )
         assert abs(pct - 60.0) < 0.1
 
     def test_crt_automation_pct_included_in_average(self):
         pct_with, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, AGENT26_FULL, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_FIVE, AGENT26_FULL, None, None, None,
         )
         pct_without, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, None, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_FIVE, None, None, None, None,
         )
         assert pct_with >= pct_without
 
     def test_zero_crt_pct_not_included_in_average(self):
         pct_with, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, AGENT26_NONE, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_FIVE, AGENT26_NONE, None, None, None,
         )
         pct_without, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, None, None, None, None,
+            AGENT3_LOW, None, None, AGENT19_FIVE, None, None, None, None,
         )
         # AGENT26_NONE (0.0) should not be added as a component
         assert pct_with == pct_without
@@ -106,28 +106,28 @@ class TestAnalyseCoverage:
     def test_uat_with_known_ac_count_correct_pct(self):
         # 2 UAT / 4 ACs = 50%
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_FOUR_ACS, None, None, None, AGENT29_TWO, None,
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, None, None, None, AGENT29_TWO, None,
         )
         assert abs(pct - 50.0) < 0.1
 
     def test_uat_without_ac_count_uses_flat_multiplier(self):
         # uat_count=2, no ac_count → min(100, 2 * 25) = 50%
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, None, None, None, AGENT29_TWO, None,
+            AGENT3_LOW, None, None, None, None, None, AGENT29_TWO, None,
         )
         assert abs(pct - 50.0) < 0.1
 
     def test_uat_capped_at_100_pct(self):
         # uat_count=5, ac_count=2 → min(100, 250%) = 100%
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_TWO_ACS, None, None, None, {"uat_test_count": 5}, None,
+            AGENT3_LOW, None, AGENT5_TWO_ACS, None, None, None, {"uat_test_count": 5}, None,
         )
         assert pct == 100.0
 
     def test_uncovered_acs_identified(self):
         # 2 ACs expected, 0 UAT → AC1, AC2 uncovered
         _, _, uncovered, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_TWO_ACS, None, None, None, AGENT29_ZERO, None,
+            AGENT3_LOW, None, AGENT5_TWO_ACS, None, None, None, AGENT29_ZERO, None,
         )
         assert "AC1" in uncovered
         assert "AC2" in uncovered
@@ -135,7 +135,7 @@ class TestAnalyseCoverage:
     def test_partial_uat_identifies_remaining_uncovered_acs(self):
         # 4 ACs, 2 UAT → AC3, AC4 uncovered
         _, _, uncovered, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_FOUR_ACS, None, None, None, AGENT29_TWO, None,
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, None, None, None, AGENT29_TWO, None,
         )
         assert "AC3" in uncovered
         assert "AC4" in uncovered
@@ -143,20 +143,20 @@ class TestAnalyseCoverage:
 
     def test_all_acs_covered_no_uncovered_list(self):
         _, _, uncovered, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_FOUR_ACS, None, None, None, AGENT29_FOUR, None,
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, None, None, None, AGENT29_FOUR, None,
         )
         assert len(uncovered) == 0
 
     def test_high_fca_below_90_threshold_gives_fail(self):
         # HIGH requires 90%; 3 gherkin = 60% → FAIL
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_HIGH, None, AGENT19_THREE, None, None, None, None,
+            AGENT3_HIGH, None, None, AGENT19_THREE, None, None, None, None,
         )
         assert verdict == "FAIL"
 
     def test_high_fca_above_90_no_gaps_gives_pass(self):
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_HIGH, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_HIGH, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
             AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
         )
         assert verdict == "PASS"
@@ -164,21 +164,21 @@ class TestAnalyseCoverage:
     def test_medium_fca_below_85_gives_fail(self):
         # MEDIUM requires 85%; 3 gherkin = 60% → FAIL
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_MEDIUM, None, AGENT19_THREE, None, None, None, None,
+            AGENT3_MEDIUM, None, None, AGENT19_THREE, None, None, None, None,
         )
         assert verdict == "FAIL"
 
-    def test_high_fca_no_fca_scenarios_gives_warn(self):
-        # Coverage above threshold but no FCA scenarios → WARN
+    def test_high_fca_no_fca_scenarios_gives_fail(self):
+        # REQ-24 Gap 3: HIGH-FCA with zero FCA scenarios → FAIL (compliance gap)
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_HIGH, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_HIGH, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
             AGENT27_MANY, AGENT29_FOUR, AGENT30_ZERO,
         )
-        assert verdict == "WARN"
+        assert verdict == "FAIL"
 
     def test_medium_fca_no_fca_scenarios_gives_warn(self):
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_MEDIUM, None, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_MEDIUM, None, None, AGENT19_FIVE, AGENT26_FULL,
             None, AGENT29_FOUR, AGENT30_ZERO,
         )
         assert verdict == "WARN"
@@ -186,7 +186,7 @@ class TestAnalyseCoverage:
     def test_low_fca_no_fca_scenarios_is_not_warn(self):
         # LOW classification — FCA scenario absence not a warn trigger
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_LOW, AGENT5_TWO_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_LOW, None, AGENT5_TWO_ACS, AGENT19_FIVE, AGENT26_FULL,
             None, AGENT29_TWO, AGENT30_ZERO,
         )
         assert verdict == "PASS"
@@ -194,14 +194,14 @@ class TestAnalyseCoverage:
     def test_uncovered_acs_with_sufficient_pct_gives_warn(self):
         # 100% gherkin + full CRT but only 1 UAT / 4 ACs → uncovered → WARN
         _, _, _, verdict = _analyse_coverage(
-            AGENT3_LOW, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
             AGENT27_MANY, {"uat_test_count": 1}, AGENT30_PRESENT,
         )
         assert verdict == "WARN"
 
     def test_by_type_dict_has_expected_keys(self):
         _, by_type, _, _ = _analyse_coverage(
-            AGENT3_LOW, None, AGENT19_FIVE, AGENT26_FULL, AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
+            AGENT3_LOW, None, None, AGENT19_FIVE, AGENT26_FULL, AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
         )
         for key in ["gherkin", "crt_automation_pct", "crt_executed", "uat", "fca_regulatory"]:
             assert key in by_type
@@ -209,7 +209,7 @@ class TestAnalyseCoverage:
     def test_overall_pct_capped_at_100(self):
         # Even if all components are 100, result should not exceed 100
         pct, _, _, _ = _analyse_coverage(
-            AGENT3_LOW, AGENT5_TWO_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT3_LOW, None, AGENT5_TWO_ACS, AGENT19_FIVE, AGENT26_FULL,
             AGENT27_MANY, AGENT29_TWO, AGENT30_PRESENT,
         )
         assert pct <= 100.0
@@ -356,3 +356,120 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.data["narrative"] == MOCK_TRACE_PASS["narrative"]
+
+
+# ── REQ-24: New gap tests ──────────────────────────────────────────────────────
+
+AGENT5_TEN_ACS = {"ac_count": 10}
+AGENT5_WITH_CLAUSES = {
+    "ac_count": 4,
+    "ac_clauses": [
+        {"description": "AC1: Block unsuitable products", "scenario_type": "regulatory"},
+        {"description": "AC2: Alert compliance team",    "scenario_type": "happy_path"},
+        {"description": "AC3: Vulnerable customer check", "scenario_type": "vulnerable_customer"},
+        {"description": "AC4: Audit trail created",       "scenario_type": "regulatory"},
+    ],
+}
+AGENT4_VC_IMPACT    = {"fca_classification": "HIGH", "vulnerable_customer_impact": True}
+AGENT4_NO_VC_IMPACT = {"fca_classification": "HIGH", "vulnerable_customer_impact": False}
+AGENT19_WITH_VC_FLAG = {
+    "scenario_count": 5,
+    "vulnerable_customer_coverage_present": True,
+}
+AGENT19_WITHOUT_VC_FLAG = {
+    "scenario_count": 5,
+    "vulnerable_customer_coverage_present": False,
+}
+AGENT26_TRUNCATED = {
+    "automation_coverage": 100.0,
+    "scenarios_truncated": True,
+    "truncated_scenario_count": 2,
+}
+
+
+class TestGherkinNormalisedREQ24:
+    def test_5_gherkin_scenarios_10_acs_gives_50_pct_not_100(self):
+        # REQ-24 Gap 1: 5 scenarios / 10 ACs = 50%, not 100%
+        pct, _, _, _ = _analyse_coverage(
+            AGENT3_LOW, None, AGENT5_TEN_ACS, AGENT19_FIVE, None, None, None, None,
+        )
+        assert abs(pct - 50.0) < 0.1
+
+    def test_gherkin_fallback_when_no_ac_count(self):
+        # No AC count → fallback: scenario_count * 20 = 5 * 20 = 100%
+        pct, _, _, _ = _analyse_coverage(
+            AGENT3_LOW, None, None, AGENT19_FIVE, None, None, None, None,
+        )
+        assert pct == 100.0
+
+
+class TestUncoveredAcsEnrichedREQ24:
+    def test_uncovered_acs_use_real_descriptions_when_clauses_present(self):
+        # REQ-24 Gap 2: with ac_clauses, uncovered list uses real descriptions
+        _, _, uncovered, _ = _analyse_coverage(
+            AGENT3_LOW, None, AGENT5_WITH_CLAUSES, None, None, None, AGENT29_TWO, None,
+        )
+        # 4 ACs, 2 UAT → clauses[2:] → AC3, AC4 descriptions
+        assert any("Vulnerable customer" in u for u in uncovered)
+        assert any("Audit trail" in u for u in uncovered)
+
+    def test_uncovered_acs_fallback_without_clauses(self):
+        # No ac_clauses → synthetic "AC3", "AC4"
+        _, _, uncovered, _ = _analyse_coverage(
+            AGENT3_LOW, None, AGENT5_FOUR_ACS, None, None, None, AGENT29_TWO, None,
+        )
+        assert "AC3" in uncovered
+        assert "AC4" in uncovered
+
+
+class TestHighFcaFcaCountFailREQ24:
+    def test_high_fca_zero_fca_scenarios_above_threshold_gives_fail(self):
+        # REQ-24 Gap 3: HIGH-FCA + fca_count=0 + coverage ≥ 90% → FAIL
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_HIGH, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            AGENT27_MANY, AGENT29_FOUR, AGENT30_ZERO,
+        )
+        assert verdict == "FAIL"
+
+    def test_medium_fca_zero_fca_scenarios_gives_warn(self):
+        # MEDIUM-FCA + zero FCA scenarios → WARN (not promoted to FAIL)
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_MEDIUM, None, AGENT5_FOUR_ACS, AGENT19_FIVE, AGENT26_FULL,
+            None, AGENT29_FOUR, AGENT30_ZERO,
+        )
+        assert verdict == "WARN"
+
+
+class TestVulnerableCustomerCoverageREQ24:
+    def test_vc_impact_true_no_vc_coverage_high_fca_gives_fail(self):
+        # REQ-24 Gap 4: VC impact + no VC coverage + HIGH FCA → FAIL
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_HIGH, AGENT4_VC_IMPACT, AGENT5_FOUR_ACS, AGENT19_WITHOUT_VC_FLAG,
+            AGENT26_FULL, AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
+        )
+        assert verdict == "FAIL"
+
+    def test_vc_impact_true_vc_coverage_present_does_not_fail(self):
+        # VC coverage present → no VC-driven FAIL
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_HIGH, AGENT4_VC_IMPACT, AGENT5_FOUR_ACS, AGENT19_WITH_VC_FLAG,
+            AGENT26_FULL, AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
+        )
+        assert verdict == "PASS"
+
+    def test_vc_impact_false_no_vc_coverage_is_not_fail(self):
+        # VC impact=False → VC coverage absence doesn't matter
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_HIGH, AGENT4_NO_VC_IMPACT, AGENT5_FOUR_ACS, AGENT19_WITHOUT_VC_FLAG,
+            AGENT26_FULL, AGENT27_MANY, AGENT29_FOUR, AGENT30_PRESENT,
+        )
+        assert verdict == "PASS"
+
+
+class TestTruncationConfidencePenaltyREQ24:
+    def test_scenarios_truncated_reduces_confidence(self):
+        from src.agents.testing.agent_33_test_coverage_analyser import _compute_confidence
+        score_clean, _   = _compute_confidence(AGENT19_FIVE, AGENT26_FULL, AGENT29_FOUR, AGENT30_PRESENT, 95.0)
+        score_trunc, _   = _compute_confidence(AGENT19_FIVE, AGENT26_TRUNCATED, AGENT29_FOUR, AGENT30_PRESENT, 95.0,
+                                               scenarios_truncated=True, truncated_count=2)
+        assert score_clean > score_trunc

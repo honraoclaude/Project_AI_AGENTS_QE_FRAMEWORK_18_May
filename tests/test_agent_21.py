@@ -18,11 +18,25 @@ AGENT3_LOW  = {"fca_classification": "LOW",  "ensemble_agreement": True}
 AGENT5_DATA = {"ac_count": 3, "acs_generated": True}
 
 AGENT7_DATA = {
-    "data_requirements": [
+    "required_records": [
         "FinancialAccount with balance > £100k",
         "Suitability record with HIGH risk profile",
     ],
     "data_complexity": "HIGH",
+}
+
+AGENT7_SHARED_ORG = {
+    "required_records": ["FinancialAccount"],
+    "data_complexity": "LOW",
+    "data_isolation_strategy": "shared_org_data",
+    "fca_context_available": False,
+}
+
+AGENT7_PER_CLASS = {
+    "required_records": ["FinancialAccount"],
+    "data_complexity": "LOW",
+    "data_isolation_strategy": "per_class_setup",
+    "fca_context_available": False,
 }
 
 AGENT13_DATA = {
@@ -371,6 +385,50 @@ class TestMechanismDesign:
         # MOCK_DATA_PASS has seed_records, anonymisation_fields, and vulnerable_profiles
         assert result.data["data_design_completeness"] >= 70
 
+    async def test_prompt_always_ends_with_tool_instruction_no_gherkin(self):
+        """REQ-13 Bug 1: prompt must end with tool instruction even when no Gherkin scenarios."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        # No agent_results["19"] → no Gherkin scenarios
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            await run(state)
+
+        call_kwargs = mock_sonnet.call_args.kwargs
+        user_msg = call_kwargs.get("user_message", "")
+        assert "tool" in user_msg.lower() or "design" in user_msg.lower(), (
+            "Prompt must include tool instruction even with no Gherkin scenarios"
+        )
+
+    async def test_required_records_key_read_from_agent7(self):
+        """REQ-13 Bug 2: Agent 21 reads required_records (not data_requirements) from Agent 07."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["7"] = {"data": AGENT7_DATA}  # has required_records key
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            await run(state)
+
+        call_kwargs = mock_sonnet.call_args.kwargs
+        user_msg = call_kwargs.get("user_message", "")
+        # required_records values should appear in the prompt
+        assert "FinancialAccount" in user_msg or "Suitability" in user_msg, (
+            "required_records content from Agent 07 must appear in the prompt"
+        )
+
     async def test_no_seed_records_reduces_completeness(self):
         state = initial_story_state("FSC-2417")
         state["agent_results"]["3"] = {"data": AGENT3_HIGH}
@@ -396,3 +454,81 @@ class TestMechanismDesign:
             result_incomplete = await run(state)
 
         assert result_pass.data["data_design_completeness"] > result_incomplete.data["data_design_completeness"]
+
+
+# ── REQ-05: isolation_override tests ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestIsolationOverrideREQ05:
+    async def test_high_fca_shared_org_data_triggers_override(self):
+        """REQ-05 Part 2: HIGH-FCA + shared_org_data → isolation_override=True."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["7"] = {"data": AGENT7_SHARED_ORG}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert result.data["isolation_override"] is True
+        assert "isolation_override_reason" in result.data
+        assert result.data["isolation_override_reason"] != ""
+
+    async def test_high_fca_per_class_setup_no_override(self):
+        """HIGH-FCA + per_class_setup (not shared_org_data) → no override."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["7"] = {"data": AGENT7_PER_CLASS}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert result.data["isolation_override"] is False
+
+    async def test_low_fca_shared_org_data_no_override(self):
+        """LOW-FCA + shared_org_data → no override (only HIGH/MEDIUM triggers it)."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_LOW}
+        state["agent_results"]["7"] = {"data": AGENT7_SHARED_ORG}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert result.data["isolation_override"] is False
+
+    async def test_isolation_override_keys_always_present(self):
+        """isolation_override and isolation_override_reason always in output data."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert "isolation_override" in result.data
+        assert "isolation_override_reason" in result.data

@@ -173,3 +173,57 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+
+# ── REQ-17: Scenario truncation detection ─────────────────────────────────────
+
+class TestScenarioTruncationREQ17:
+    def test_truncation_flag_in_confidence(self):
+        score_without, _ = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS", scenarios_truncated=False)
+        score_with, _ = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS", scenarios_truncated=True)
+        assert score_without > score_with
+
+    def test_no_truncation_penalty_when_false(self):
+        score, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS", scenarios_truncated=False)
+        assert "crt_scenario_truncated" not in signals
+
+    def test_manual_test_suppresses_low_coverage_penalty(self):
+        score_with_manual, _ = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 2, 20.0, "PARTIAL", manual_test_present=True)
+        score_without_manual, _ = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 2, 20.0, "PARTIAL", manual_test_present=False)
+        assert score_with_manual >= score_without_manual
+
+
+@pytest.mark.asyncio
+class TestScenarioTruncationRunREQ17:
+    async def test_12_scenarios_gives_scenarios_truncated_true(self):
+        twelve_scenarios = [
+            {"title": f"Scenario {i}", "tags": ["@smoke"],
+             "steps": ["Given step", "When action", "Then result"]}
+            for i in range(12)
+        ]
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["19"] = {"data": {
+            "scenario_count": 12,
+            "fca_coverage_present": True,
+            "gherkin_scenarios": twelve_scenarios,
+        }}
+
+        with patch("src.agents.testing.agent_26_crt_scenario_designer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRT_FULL
+            result = await run(state)
+
+        assert result.data["scenarios_truncated"] is True
+        assert result.data["truncated_scenario_count"] == 2
+
+    async def test_4_scenarios_gives_scenarios_truncated_false(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["19"] = {"data": AGENT19_FULL}
+
+        with patch("src.agents.testing.agent_26_crt_scenario_designer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRT_FULL
+            result = await run(state)
+
+        assert result.data["scenarios_truncated"] is False
+        assert result.data["truncated_scenario_count"] == 0

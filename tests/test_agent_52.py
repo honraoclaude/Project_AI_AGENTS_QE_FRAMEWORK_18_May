@@ -1,5 +1,7 @@
 """Tests for Agent 52 — Severity Calibration Agent (Augmented Script)."""
 
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -165,6 +167,25 @@ class TestAgentBaseMap:
             assert isinstance(base, int), f"Agent {agent_id} base is not int"
             assert 20 <= base <= 90, f"Agent {agent_id} base {base} out of range"
 
+    def test_agent_base_map_in_sync(self):
+        """Assert _AGENT_BASE_MAP matches TierBScorer(base=N) in each agent source file."""
+        agents_root = Path(__file__).parent.parent / "src" / "agents"
+        mismatches = []
+        for path in sorted(agents_root.rglob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            id_match = re.search(r"^AGENT_ID\s*=\s*(\d+)", source, re.MULTILINE)
+            base_match = re.search(r"TierBScorer\(base=(\d+)\)", source)
+            if not id_match or not base_match:
+                continue  # Tier-A agents or non-agent files — no TierBScorer, skip
+            agent_id = int(id_match.group(1))
+            extracted_base = int(base_match.group(1))
+            if agent_id in _AGENT_BASE_MAP and _AGENT_BASE_MAP[agent_id] != extracted_base:
+                mismatches.append(
+                    f"Agent {agent_id}: _AGENT_BASE_MAP={_AGENT_BASE_MAP[agent_id]}, "
+                    f"source={extracted_base} ({path.name})"
+                )
+        assert not mismatches, "Base map out of sync:\n" + "\n".join(mismatches)
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -241,3 +262,57 @@ class TestRunScheduled:
             result = await run_scheduled()
 
         assert isinstance(result.data["threshold_adjustments"], list)
+
+
+# ── REQ-33: _AGENT_BASE_MAP sync test ────────────────────────────────────────
+
+import ast
+import re
+
+
+class TestAgentBaseMapSync:
+    def _extract_base_from_file(self, filepath: str) -> int | None:
+        """Extract TierBScorer(base=N) value from a Python source file."""
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            return None
+        m = re.search(r'TierBScorer\(base=(\d+)\)', source)
+        return int(m.group(1)) if m else None
+
+    def _extract_agent_id_from_file(self, filepath: str) -> int | None:
+        """Extract AGENT_ID = N from a Python source file."""
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            return None
+        m = re.search(r'^AGENT_ID\s*=\s*(\d+)', source, re.MULTILINE)
+        return int(m.group(1)) if m else None
+
+    def test_agent_base_map_matches_source(self):
+        import pathlib
+        from src.agents.monitoring.agent_52_severity_calibration import _AGENT_BASE_MAP
+
+        agents_root = pathlib.Path("src/agents")
+        mismatches: list[str] = []
+
+        for py_file in agents_root.rglob("agent_*.py"):
+            # skip agent_52 itself and non-agent helpers
+            if "agent_52" in py_file.name:
+                continue
+            agent_id = self._extract_agent_id_from_file(str(py_file))
+            base = self._extract_base_from_file(str(py_file))
+            if agent_id is None or base is None:
+                continue  # Tier A agents or no TierBScorer — not in map, skip
+            if agent_id in _AGENT_BASE_MAP:
+                if _AGENT_BASE_MAP[agent_id] != base:
+                    mismatches.append(
+                        f"Agent {agent_id} ({py_file.name}): "
+                        f"source base={base}, map has {_AGENT_BASE_MAP[agent_id]}"
+                    )
+
+        assert not mismatches, (
+            "AGENT_BASE_MAP is out of sync with agent sources:\n" + "\n".join(mismatches)
+        )

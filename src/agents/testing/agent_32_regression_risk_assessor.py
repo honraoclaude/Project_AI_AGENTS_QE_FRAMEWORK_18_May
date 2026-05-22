@@ -106,6 +106,7 @@ async def run(state: StoryState) -> AgentResult:
         "regression_risk_level": risk_level,
         "regression_risk_factors": factors,
         "shared_components": shared,
+        "shared_components_stub": True,  # REQ-23: real cross-story data requires sprint query
         "recommended_regression_suite": suite,
         "regression_verdict": verdict,
         "regression_concern": trace.get("regression_concern", "none"),
@@ -170,6 +171,11 @@ def _assess_regression_risk(
     if shared:
         factors.append(f"Components edited by multiple developers: {shared}")
 
+    # REQ-23: Development phase verdict elevates regression risk
+    dev_verdict = (agent23_data or {}).get("development_verdict", "PASS")
+    if dev_verdict in ("PARTIAL", "FAIL"):
+        factors.append(f"Development verdict was {dev_verdict} — elevated regression risk")
+
     # Risk scoring
     risk_score = 0
     if len(blast) >= 2:
@@ -186,6 +192,8 @@ def _assess_regression_risk(
         risk_score += 1
     if fca_class == "HIGH":
         risk_score += 1
+    if dev_verdict in ("PARTIAL", "FAIL"):
+        risk_score += 2
 
     if risk_score >= 5:
         risk_level = "HIGH"

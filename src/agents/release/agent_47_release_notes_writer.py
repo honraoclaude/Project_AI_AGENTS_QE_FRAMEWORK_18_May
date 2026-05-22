@@ -80,13 +80,18 @@ You are generating release notes for a Salesforce FSC Wealth Management feature 
 under FCA regulatory oversight.
 
 You receive the story's acceptance criteria, BDD Gherkin scenarios, development phase
-summary, and test coverage figures.
+summary, test coverage figures, and the FCA classification.
 
 Write release notes that are:
 - Clear and concise for QE engineers and developers
 - Accurate: reflect what was actually tested and covered
 - Compliant: include a regulatory section calling out FCA-relevant changes
 - Honest about any coverage gaps or limitations
+
+Regulatory section rules by FCA classification:
+- HIGH: mandatory — reference COBS 9, Consumer Duty PS22/9, and any FG21/1 Vulnerable Customer scenarios tested
+- MEDIUM: required — reference Consumer Duty outcomes and COBS requirements covered
+- LOW: note "No FCA regulatory obligations identified for this story" unless incidental regulatory scenarios were run
 
 If source data is sparse, still produce a best-effort document and mark verdict=PARTIAL.
 If no meaningful data is available, mark verdict=FAILED.
@@ -97,12 +102,13 @@ If no meaningful data is available, mark verdict=FAILED.
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent3_data  = _get_agent_data(state, "3")
     agent5_data  = _get_agent_data(state, "5")
     agent19_data = _get_agent_data(state, "19")
     agent23_data = _get_agent_data(state, "23")
     agent33_data = _get_agent_data(state, "33")
 
-    notes_msg = _build_notes_message(story_id, agent5_data, agent19_data, agent23_data, agent33_data)
+    notes_msg = _build_notes_message(story_id, agent3_data, agent5_data, agent19_data, agent23_data, agent33_data)
     result_data = await _run_notes(notes_msg)
 
     title      = result_data.get("release_title", f"{story_id} Release")
@@ -186,24 +192,31 @@ async def _run_notes(user_message: str) -> dict:
 
 def _build_notes_message(
     story_id: str,
+    agent3_data: dict | None,
     agent5_data: dict | None,
     agent19_data: dict | None,
     agent23_data: dict | None,
     agent33_data: dict | None,
 ) -> str:
-    acs            = (agent5_data or {}).get("acceptance_criteria", [])
-    ac_count       = (agent5_data or {}).get("ac_count", len(acs))
-    scenarios      = (agent19_data or {}).get("scenarios", "")
-    scenario_count = (agent19_data or {}).get("scenario_count", 0)
+    fca_class      = (agent3_data or {}).get("fca_classification", "UNKNOWN")
+    ac_clauses     = (agent5_data or {}).get("ac_clauses", [])
+    ac_count       = (agent5_data or {}).get("ac_count", len(ac_clauses))
+    ac_descriptions = [c.get("description", "") for c in ac_clauses if c.get("description")]
+    gherkin        = (agent19_data or {}).get("gherkin_scenarios", [])
+    scenario_count = (agent19_data or {}).get("scenario_count", len(gherkin))
+    scenario_titles = [s.get("title", "") for s in gherkin]
     dev_verdict    = (agent23_data or {}).get("development_verdict", "UNKNOWN")
     dev_summary    = (agent23_data or {}).get("narrative", "")
     coverage_pct   = (agent33_data or {}).get("overall_coverage_pct", 0.0)
     cov_verdict    = (agent33_data or {}).get("coverage_verdict", "UNKNOWN")
 
+    ac_block = "\n".join(f"  - {d}" for d in ac_descriptions) if ac_descriptions else "(not available)"
+    scenario_block = "\n".join(f"  - {t}" for t in scenario_titles) if scenario_titles else "(not available)"
     return (
-        f"Story: {story_id}\n\n"
-        f"Acceptance Criteria ({ac_count} ACs):\n{acs or '(not available)'}\n\n"
-        f"BDD Gherkin Scenarios ({scenario_count} scenarios):\n{scenarios or '(not available)'}\n\n"
+        f"Story: {story_id}\n"
+        f"FCA Classification: {fca_class}\n\n"
+        f"Acceptance Criteria ({ac_count} ACs):\n{ac_block}\n\n"
+        f"BDD Gherkin Scenarios ({scenario_count} scenarios):\n{scenario_block}\n\n"
         f"Development Phase: verdict={dev_verdict}\n{dev_summary}\n\n"
         f"Test Coverage: {coverage_pct:.1f}%, verdict={cov_verdict}\n\n"
         f"Generate release notes using the {_NOTES_TOOL_NAME} tool."

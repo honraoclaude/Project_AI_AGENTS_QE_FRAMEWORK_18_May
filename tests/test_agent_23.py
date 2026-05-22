@@ -251,3 +251,112 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-15: isolation_override + FCA-conditional INCOMPLETE criticality ───────
+
+class TestIsolationOverrideAndFCAIncompleteREQ15:
+    def test_high_fca_gherkin_incomplete_is_critical(self):
+        """Option B: HIGH-FCA + gherkin INCOMPLETE → critical_failures."""
+        signals = {
+            "19": {"agent_name": "BDD Gherkin", "verdict": "INCOMPLETE", "data": {}},
+            "21": {"agent_name": "Test Data Architect", "verdict": "PASS",
+                   "data": {"isolation_override": False}},
+        }
+        critical, advisory = _classify_signals(signals, fca_class="HIGH")
+        assert any("BDD Gherkin" in f or "INCOMPLETE" in f for f in critical)
+
+    def test_high_fca_data_incomplete_is_critical(self):
+        """Option B: HIGH-FCA + data INCOMPLETE → critical_failures."""
+        signals = {
+            "21": {"agent_name": "Test Data Architect", "verdict": "INCOMPLETE",
+                   "data": {"isolation_override": False}},
+        }
+        critical, _ = _classify_signals(signals, fca_class="HIGH")
+        assert any("Test Data Architect" in f or "INCOMPLETE" in f for f in critical)
+
+    def test_low_fca_gherkin_incomplete_is_only_advisory(self):
+        """LOW-FCA + INCOMPLETE → advisory only, not critical."""
+        signals = {
+            "19": {"agent_name": "BDD Gherkin", "verdict": "INCOMPLETE", "data": {}},
+            "21": {"agent_name": "Test Data Architect", "verdict": "PASS",
+                   "data": {"isolation_override": False}},
+        }
+        critical, advisory = _classify_signals(signals, fca_class="LOW")
+        assert not any("BDD Gherkin" in f for f in critical)
+        assert any("INCOMPLETE" in a for a in advisory)
+
+    def test_isolation_override_gives_advisory_warning(self):
+        """isolation_override=True → advisory_warnings contains override message."""
+        signals = {
+            "21": {
+                "agent_name": "Test Data Architect",
+                "verdict": "PASS",
+                "data": {
+                    "isolation_override": True,
+                    "isolation_override_reason": "Overridden for HIGH FCA",
+                },
+            },
+        }
+        _, advisory = _classify_signals(signals, fca_class="HIGH")
+        assert any("isolation" in a.lower() or "corrected" in a.lower() for a in advisory)
+
+    def test_no_isolation_override_no_extra_advisory(self):
+        signals = {
+            "21": {"agent_name": "Test Data Architect", "verdict": "PASS",
+                   "data": {"isolation_override": False}},
+        }
+        _, advisory = _classify_signals(signals, fca_class="HIGH")
+        assert not any("isolation" in a.lower() for a in advisory)
+
+
+@pytest.mark.asyncio
+class TestIsolationOverrideInRunREQ15:
+    async def test_isolation_override_in_trace_record(self):
+        state = _make_state_all_pass()
+        state["agent_results"]["21"] = {
+            "data": {
+                "data_verdict": "PASS",
+                "isolation_override": True,
+                "isolation_override_reason": "Overridden for HIGH FCA",
+            }
+        }
+
+        with patch("src.agents.development.agent_23_story_code_tracer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.data["isolation_override"] is True
+        assert result.data["trace_record"]["isolation_override"] is True
+
+    async def test_isolation_override_in_gate_g4_signals(self):
+        state = _make_state_all_pass()
+        state["agent_results"]["21"] = {
+            "data": {
+                "data_verdict": "PASS",
+                "isolation_override": True,
+                "isolation_override_reason": "Overridden for HIGH FCA",
+            }
+        }
+
+        with patch("src.agents.development.agent_23_story_code_tracer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.data["gate_g4_signals"].get("isolation_override") is True
+
+    async def test_high_fca_gherkin_incomplete_triggers_fail_verdict(self):
+        """REQ-15 Option B in run(): HIGH-FCA + INCOMPLETE → FAIL."""
+        state = _make_state_all_pass()
+        state["agent_results"]["3"] = {"data": {"fca_classification": "HIGH"}}
+        state["agent_results"]["19"] = {"data": {"gherkin_verdict": "INCOMPLETE", "scenario_count": 0}}
+
+        with patch("src.agents.development.agent_23_story_code_tracer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.data["development_verdict"] == "FAIL"
+        assert result.data["escalation_required"] is True

@@ -84,6 +84,39 @@ _OBJECT_ALIASES: dict[str, str] = {
     "client":                       "individual",
 }
 
+# Integration pattern keywords for platform events and external services
+# Detected from story text — these are not FSC object-model dependencies but async/external ones.
+_PLATFORM_EVENT_KEYWORDS: frozenset[str] = frozenset({
+    "platform event",
+    "platformevent",
+    "publish event",
+    "streaming api",
+    "eventbus",
+    "event bus",
+    "publish subscribe",
+    "pub/sub",
+})
+
+_EXTERNAL_SERVICE_KEYWORDS: frozenset[str] = frozenset({
+    "named credential",
+    "namedcredential",
+    "connected app",
+    "connectedapp",
+    "http callout",
+    "httpcallout",
+    "rest callout",
+    "soap callout",
+    "external data source",
+    "externaldatasource",
+    "external service",
+    "externalservice",
+    "api callout",
+    "callout",
+    "aum provider",
+    "financial data feed",
+    "data feed",
+})
+
 # Haiku tool for narrative generation only
 _TRACE_TOOL_NAME = "generate_dependency_narrative"
 _TRACE_TOOL_SCHEMA = {
@@ -125,11 +158,11 @@ async def run(state: StoryState) -> AgentResult:
     story = await get_story(story_id)
 
     # ── Deterministic analysis ────────────────────────────────────────────────
-    detected, implied, graph, depth = _analyse_dependencies(story)
+    detected, implied, graph, depth, has_external_deps, dep_types = _analyse_dependencies(story)
     cross_object_count = len(detected) + len(implied)
 
     # ── Haiku trace generation ────────────────────────────────────────────────
-    trace_message = _build_trace_message(story, detected, implied, depth)
+    trace_message = _build_trace_message(story, detected, implied, depth, has_external_deps, dep_types)
     trace = await _generate_trace(trace_message)
 
     confidence_score, signals = _compute_confidence(story, detected, implied, depth)
@@ -138,6 +171,7 @@ async def run(state: StoryState) -> AgentResult:
     what = (
         f"Dependency map for {story_id}: detected={detected}, "
         f"implied={implied}, depth={depth}"
+        + (f", external_deps={dep_types}" if has_external_deps else "")
     )
     why = trace.get("narrative", "Dependency mapping applied FSC object rules deterministically.")
 
@@ -148,6 +182,8 @@ async def run(state: StoryState) -> AgentResult:
         "dependency_depth": depth,
         "cross_object_count": cross_object_count,
         "dependency_complexity": trace.get("dependency_complexity", "low"),
+        "has_external_dependencies": has_external_deps,
+        "detected_dependency_types": dep_types,
         "narrative": trace.get("narrative", ""),
         "signals": signals,
     }
@@ -172,10 +208,11 @@ async def run(state: StoryState) -> AgentResult:
 
 # ── Deterministic dependency analysis ────────────────────────────────────────
 
-def _analyse_dependencies(story: dict) -> tuple[list[str], list[str], dict, int]:
+def _analyse_dependencies(story: dict) -> tuple[list[str], list[str], dict, int, bool, list[str]]:
     """
     Scan story text → detect FSC objects → map implied parents.
-    Returns (detected, implied, graph, max_depth).
+    Also detects platform event and external service integration patterns.
+    Returns (detected, implied, graph, max_depth, has_external_deps, dep_types).
     Pure Python — no LLM involved.
     """
     text = (
@@ -214,7 +251,15 @@ def _analyse_dependencies(story: dict) -> tuple[list[str], list[str], dict, int]
     implied = sorted(visited - detected - {"household", "individual"})
     detected_list = sorted(detected)
 
-    return detected_list, implied, graph, depth
+    # Detect integration patterns (platform events + external services)
+    dep_types: list[str] = []
+    if any(kw in text for kw in _PLATFORM_EVENT_KEYWORDS):
+        dep_types.append("platform_event")
+    if any(kw in text for kw in _EXTERNAL_SERVICE_KEYWORDS):
+        dep_types.append("external_service")
+    has_external_deps = bool(dep_types)
+
+    return detected_list, implied, graph, depth, has_external_deps, dep_types
 
 
 # ── Confidence scoring (Tier B, high base) ────────────────────────────────────
@@ -271,12 +316,19 @@ def _build_trace_message(
     detected: list[str],
     implied: list[str],
     depth: int,
+    has_external_deps: bool = False,
+    dep_types: list[str] | None = None,
 ) -> str:
+    ext_line = (
+        f"Integration patterns detected: {dep_types}\n"
+        if has_external_deps else ""
+    )
     return (
         f"Story: {story['story_id']} — {story['summary']}\n\n"
         f"Detected FSC objects: {detected or ['none']}\n"
         f"Implied parent objects: {implied or ['none']}\n"
-        f"Dependency depth: {depth}\n\n"
+        f"Dependency depth: {depth}\n"
+        f"{ext_line}\n"
         f"Generate a 2–3 sentence narrative explaining these findings using the "
         f"generate_dependency_narrative tool."
     )

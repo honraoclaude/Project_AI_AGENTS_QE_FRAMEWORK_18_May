@@ -268,3 +268,128 @@ class TestRunIncident:
             )
 
         assert "TECH_LEAD" in result.data["escalate_to"]
+
+
+# ── REQ-34: new tests ─────────────────────────────────────────────────────────
+
+MOCK_TRIAGE_NO_CO = {
+    "incident_severity": "P2",
+    "rollback_recommended": False,
+    "triage_steps": ["Check Apex debug logs", "Review Event Log Files", "Contact vendor"],
+    "escalate_to": ["TECH_LEAD", "QE_LEAD"],  # deliberately no CO
+    "estimated_resolution": "1 hour",
+    "incident_verdict": "MONITORING",
+    "narrative": "Performance degradation detected. Monitoring active.",
+}
+
+MOCK_TRIAGE_WITH_CO = {
+    "incident_severity": "P2",
+    "rollback_recommended": False,
+    "triage_steps": ["Check Apex debug logs", "Review Event Log Files", "Contact vendor"],
+    "escalate_to": ["CO", "TECH_LEAD"],
+    "estimated_resolution": "1 hour",
+    "incident_verdict": "MONITORING",
+    "narrative": "Performance degradation detected. Monitoring active.",
+}
+
+
+@pytest.mark.asyncio
+class TestREQ34DeterministicCOEscalation:
+    async def test_high_fca_adds_co_when_missing_from_llm(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "HIGH"}}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_NO_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run(state)
+
+        assert "CO" in result.data["escalate_to"]
+
+    async def test_medium_fca_adds_co_when_missing(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "MEDIUM"}}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_NO_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run(state)
+
+        assert "CO" in result.data["escalate_to"]
+
+    async def test_low_fca_does_not_add_co(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "LOW"}}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_NO_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run(state)
+
+        assert "CO" not in result.data["escalate_to"]
+
+    async def test_co_not_duplicated_when_already_present(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "HIGH"}}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_WITH_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run(state)
+
+        assert result.data["escalate_to"].count("CO") == 1
+
+    async def test_run_incident_high_fca_adds_co(self):
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_NO_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run_incident(
+                story_id="FSC-2417",
+                incident_type="data_integrity",
+                severity_hint="P2",
+                error_details="Suitability score mismatch",
+                fca_classification="HIGH",
+            )
+
+        assert "CO" in result.data["escalate_to"]
+
+
+@pytest.mark.asyncio
+class TestREQ34FcaAuditLedgerWrite:
+    async def test_emit_called_on_incident(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_P2
+            mock_qds.emit_decision_event = AsyncMock()
+            await run(state)
+
+        mock_qds.emit_decision_event.assert_called_once()
+        call_kwargs = mock_qds.emit_decision_event.call_args
+        assert call_kwargs.kwargs.get("event_type") == "INCIDENT" or \
+               (call_kwargs.args and call_kwargs.args[0] == "INCIDENT")
+
+    async def test_emit_failure_does_not_break_incident_response(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_P2
+            mock_qds.emit_decision_event = AsyncMock(side_effect=Exception("DB down"))
+            result = await run(state)
+
+        assert result.agent_id == 53
+        assert "incident_verdict" in result.data

@@ -257,3 +257,52 @@ class TestTAEnhancedShapley:
             result = await run(state)
 
         assert result.data["ta_evidence_summary"]["3"] == "OK"
+
+
+# ── REQ-28: new tests ─────────────────────────────────────────────────────────
+
+from src.agents.release.agent_44_fca_evidence_pack import _build_evidence_message
+
+
+class TestREQ28CdObligationsKeyFix:
+    def test_cd_obligations_key_used_not_obligations_mapped(self):
+        agent4_with_obligations = {
+            "consumer_duty_verdict": "PASS",
+            "cd_obligations": ["fair_outcomes", "consumer_understanding"],
+        }
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, agent4_with_obligations,
+            None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert "fair_outcomes" in msg
+
+    def test_obligations_mapped_key_absent_no_crash(self):
+        # Old key "obligations_mapped" should not be read — should not raise
+        agent4_old_key = {
+            "consumer_duty_verdict": "PASS",
+            "obligations_mapped": ["should_not_appear"],
+        }
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, agent4_old_key,
+            None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        # With the fix, cd_obligations key is used — old key falls through to []
+        assert "should_not_appear" not in msg
+
+
+class TestREQ28Agent29Fallback:
+    def test_co_required_from_agent29_when_agent36_absent(self):
+        agent29 = {"co_sign_off_required": True}
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS,
+            agent29, AGENT30_FULL, AGENT33_PASS, None,
+        )
+        assert "co_required" in msg.lower() or "co required" in msg.lower() or "sign-off" in msg.lower() or "sign_off" in msg.lower()
+
+    def test_agent36_preferred_over_agent29_when_both_present(self):
+        agent29 = {"co_sign_off_required": True}
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS,
+            agent29, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert "SIGNED_OFF" in msg

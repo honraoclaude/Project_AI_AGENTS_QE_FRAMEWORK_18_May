@@ -220,25 +220,25 @@ async def run(state: StoryState) -> AgentResult:
     escalated = confidence_score < settings.confidence_escalation_threshold
 
     dimension_scores = {
-        "independent": extracted["independent_score"],
-        "negotiable":  extracted["negotiable_score"],
-        "valuable":    extracted["valuable_score"],
-        "estimable":   extracted["estimable_score"],
-        "small":       extracted["small_score"],
-        "testable":    extracted["testable_score"],
+        "independent": extracted.get("independent_score", 0),
+        "negotiable":  extracted.get("negotiable_score", 0),
+        "valuable":    extracted.get("valuable_score", 0),
+        "estimable":   extracted.get("estimable_score", 0),
+        "small":       extracted.get("small_score", 0),
+        "testable":    extracted.get("testable_score", 0),
         "total_raw":   sum([
-            extracted["independent_score"], extracted["negotiable_score"],
-            extracted["valuable_score"],    extracted["estimable_score"],
-            extracted["small_score"],       extracted["testable_score"],
+            extracted.get("independent_score", 0), extracted.get("negotiable_score", 0),
+            extracted.get("valuable_score", 0),    extracted.get("estimable_score", 0),
+            extracted.get("small_score", 0),       extracted.get("testable_score", 0),
         ]),
     }
 
     what = (
         f"INVEST score for {story_id}: {invest_score}/100 "
-        f"({extracted['invest_verdict']}) — "
-        f"I={extracted['independent_score']} N={extracted['negotiable_score']} "
-        f"V={extracted['valuable_score']} E={extracted['estimable_score']} "
-        f"S={extracted['small_score']} T={extracted['testable_score']}"
+        f"({extracted.get('invest_verdict', 'UNKNOWN')}) — "
+        f"I={extracted.get('independent_score', 0)} N={extracted.get('negotiable_score', 0)} "
+        f"V={extracted.get('valuable_score', 0)} E={extracted.get('estimable_score', 0)} "
+        f"S={extracted.get('small_score', 0)} T={extracted.get('testable_score', 0)}"
     )
     why = (
         "INVEST Quality Agent scored the story across six readiness dimensions. "
@@ -250,15 +250,15 @@ async def run(state: StoryState) -> AgentResult:
     data = {
         "invest_score": invest_score,
         "invest_total_raw": dimension_scores["total_raw"],
-        "invest_verdict": extracted["invest_verdict"],
+        "invest_verdict": extracted.get("invest_verdict", "FAIL"),
         "dimension_scores": dimension_scores,
         "dimension_rationales": {
-            "independent": extracted["independent_rationale"],
-            "negotiable":  extracted["negotiable_rationale"],
-            "valuable":    extracted["valuable_rationale"],
-            "estimable":   extracted["estimable_rationale"],
-            "small":       extracted["small_rationale"],
-            "testable":    extracted["testable_rationale"],
+            "independent": extracted.get("independent_rationale", ""),
+            "negotiable":  extracted.get("negotiable_rationale", ""),
+            "valuable":    extracted.get("valuable_rationale", ""),
+            "estimable":   extracted.get("estimable_rationale", ""),
+            "small":       extracted.get("small_rationale", ""),
+            "testable":    extracted.get("testable_rationale", ""),
         },
         "blocking_issues": extracted.get("blocking_issues", []),
         "improvement_suggestions": extracted.get("improvement_suggestions", []),
@@ -290,9 +290,9 @@ async def run(state: StoryState) -> AgentResult:
 def _get_invest_score(extracted: dict) -> int:
     """Normalise raw sum (0–120) to 0–100."""
     total = (
-        extracted["independent_score"] + extracted["negotiable_score"] +
-        extracted["valuable_score"]    + extracted["estimable_score"] +
-        extracted["small_score"]       + extracted["testable_score"]
+        extracted.get("independent_score", 0) + extracted.get("negotiable_score", 0) +
+        extracted.get("valuable_score", 0)    + extracted.get("estimable_score", 0) +
+        extracted.get("small_score", 0)       + extracted.get("testable_score", 0)
     )
     return int(total * 100 / 120)
 
@@ -316,7 +316,7 @@ def _compute_confidence(
         scorer.add("invest_margin", margin, -5)    # 75–84: borderline call
 
     # Signal 2: Testable score is the most observable dimension (ACs either exist or they don't)
-    testable = extracted["testable_score"]
+    testable = extracted.get("testable_score", 0)
     if testable >= 14:
         scorer.add("testable_high", testable, +8)  # clear ACs → reliable T score
     elif testable <= 5:

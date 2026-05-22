@@ -211,3 +211,67 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.agent_id == 7
+
+
+# ── REQ-05: fca_context_available + defensive default tests ──────────────────
+
+MOCK_DATA_NEED_SHARED_ORG = {
+    **MOCK_DATA_NEED_COMPLEX,
+    "data_isolation_strategy": "shared_org_data",
+    "fca_context_available": False,
+}
+
+
+@pytest.mark.asyncio
+class TestFcaContextAvailableREQ05:
+    async def test_fca_context_available_always_false(self):
+        """REQ-05: Agent 07 always emits fca_context_available=False (runs before Agent 03)."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX
+            result = await run(state)
+
+        assert "fca_context_available" in result.data
+        assert result.data["fca_context_available"] is False
+
+    async def test_shared_org_data_overridden_to_per_class_setup(self):
+        """REQ-05: LLM returning shared_org_data must be overridden to per_class_setup."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_SHARED_ORG
+            result = await run(state)
+
+        assert result.data["data_isolation_strategy"] != "shared_org_data", (
+            "shared_org_data must be overridden when fca_context_available=False"
+        )
+        assert result.data["data_isolation_strategy"] == "per_class_setup"
+
+    async def test_per_class_setup_not_overridden(self):
+        """REQ-05: per_class_setup must not be changed by the defensive override."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX  # isolation=per_class_setup
+            result = await run(state)
+
+        assert result.data["data_isolation_strategy"] == "per_class_setup"

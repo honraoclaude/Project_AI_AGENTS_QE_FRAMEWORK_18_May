@@ -57,11 +57,12 @@ _TRACE_TOOL_SCHEMA = {
         },
         "coverage_concern": {
             "type": "string",
-            "enum": ["none", "low", "critical"],
+            "enum": ["none", "low", "medium", "critical"],
             "description": (
                 "none: Coverage meets threshold, all tests passing. "
-                "low: Coverage within 5% of threshold or minor test failures. "
-                "critical: Coverage below threshold or tests failing."
+                "low: Within 5% of threshold, no test failures. "
+                "medium: 6–15% below threshold, or minor test failures. "
+                "critical: More than 15% below threshold, or multiple test failures."
             ),
         },
     },
@@ -93,9 +94,26 @@ async def run(state: StoryState) -> AgentResult:
 
     fca_class = (agent3_data or {}).get("fca_classification", "UNCLASSIFIED")
 
+    # ── Per-class coverage + uncovered classes cross-reference ───────────────────
+    per_class_coverage = test_results.get("per_class_coverage", [])
+    apex_test_classes = (agent6_data or {}).get("apex_unit_test_classes", [])
+    # apex_unit_test_classes are strings like "ClassName — description"; extract class name
+    expected_class_names = {
+        entry.split(" ")[0].split("—")[0].strip()
+        for entry in apex_test_classes
+        if entry.strip()
+    }
+    uncovered_classes = [
+        cls["class_name"]
+        for cls in per_class_coverage
+        if cls.get("class_name") in expected_class_names
+        and not cls.get("meets_threshold", True)
+    ]
+
     # ── Haiku trace generation ────────────────────────────────────────────────
     trace_message = _build_trace_message(
         story_id, coverage_pct, threshold, tests_run, tests_failed, verdict, fca_class,
+        uncovered_classes,
     )
     trace = await _generate_trace(trace_message)
 
@@ -124,6 +142,8 @@ async def run(state: StoryState) -> AgentResult:
         "tests_failed": tests_failed,
         "fca_classification": fca_class,
         "coverage_concern": trace.get("coverage_concern", "none"),
+        "per_class_coverage": per_class_coverage,
+        "uncovered_classes": uncovered_classes,
         "narrative": trace.get("narrative", ""),
         "signals": signals,
     }
@@ -248,7 +268,12 @@ def _build_trace_message(
     tests_failed: int,
     verdict: str,
     fca_class: str,
+    uncovered_classes: list[str] | None = None,
 ) -> str:
+    uncovered_line = (
+        f"Under-covered classes: {', '.join(uncovered_classes)}\n"
+        if uncovered_classes else ""
+    )
     return (
         f"Story: {story_id}\n"
         f"FCA Classification: {fca_class}\n\n"
@@ -256,7 +281,8 @@ def _build_trace_message(
         f"Required threshold: {threshold}%\n"
         f"Tests run: {tests_run}\n"
         f"Tests failed: {tests_failed}\n"
-        f"Coverage verdict: {verdict}\n\n"
+        f"Coverage verdict: {verdict}\n"
+        f"{uncovered_line}\n"
         f"Generate a 2–3 sentence narrative using the {_TRACE_TOOL_NAME} tool."
     )
 

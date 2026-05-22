@@ -125,7 +125,7 @@ async def run(state: StoryState) -> AgentResult:
     story = await get_story(story_id)
 
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
-    data_needs = (agent7_data or {}).get("data_requirements", [])
+    data_needs = (agent7_data or {}).get("required_records", [])
     gherkin_scenarios = (agent19_data or {}).get("gherkin_scenarios", [])
     objects_in_scope = (agent13_data or {}).get("detected_objects", [])
     ac_count = (agent5_data or {}).get("ac_count", 0)
@@ -158,6 +158,19 @@ async def run(state: StoryState) -> AgentResult:
     setup_notes = result.get("data_setup_notes", "")
     gaps = result.get("coverage_gaps", [])
 
+    # REQ-05 Part 2: reconcile isolation strategy with FCA tier
+    # Agent 07 ran before FCA classification was known; if HIGH/MEDIUM FCA was later confirmed
+    # and Agent 07 recommended shared_org_data, override to per_test_setup_teardown.
+    agent7_isolation = (agent7_data or {}).get("data_isolation_strategy", "per_class_setup")
+    isolation_override = False
+    isolation_override_reason = ""
+    if fca_class in ("HIGH", "MEDIUM") and agent7_isolation == "shared_org_data":
+        isolation_override = True
+        isolation_override_reason = (
+            f"Agent 07 recommended shared_org_data without FCA context; "
+            f"overridden to per_test_setup_teardown for {fca_class}-FCA story"
+        )
+
     confidence_score, signals = _compute_confidence(
         agent3_data, agent7_data, agent13_data, agent19_data,
         len(seed_records), verdict, fca_class, vulnerable_profiles,
@@ -185,6 +198,8 @@ async def run(state: StoryState) -> AgentResult:
         "data_verdict": verdict,
         "coverage_gaps": gaps,
         "seed_record_count": len(seed_records),
+        "isolation_override": isolation_override,
+        "isolation_override_reason": isolation_override_reason,
         "data_design_completeness": _compute_completeness(
             seed_records, fca_class, vulnerable_profiles, verdict, anon_fields
         ),
@@ -269,6 +284,11 @@ def _build_prompt(
     ac_count: int,
 ) -> str:
     scenario_titles = [s.get("title", "") for s in gherkin_scenarios[:8]]
+    scenario_block = (
+        "\n".join(f"  - {t}" for t in scenario_titles)
+        if scenario_titles
+        else "  (no Gherkin scenarios available)"
+    )
     return (
         f"Story ID: {story_id}\n"
         f"Title: {story.get('summary', 'N/A')}\n"
@@ -277,9 +297,8 @@ def _build_prompt(
         f"Data requirements from refinement: {data_needs or ['not captured']}\n"
         f"Objects in scope: {objects_in_scope or ['not yet determined']}\n"
         f"Gherkin scenarios ({len(gherkin_scenarios)} available):\n"
-        + "\n".join(f"  - {t}" for t in scenario_titles) if scenario_titles
-        else "  (no Gherkin scenarios available)"
-        + f"\n\nDesign the test data strategy using the {_DATA_TOOL_NAME} tool."
+        f"{scenario_block}\n\n"
+        f"Design the test data strategy using the {_DATA_TOOL_NAME} tool."
     )
 
 

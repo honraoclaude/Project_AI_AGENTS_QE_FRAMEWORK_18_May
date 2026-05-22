@@ -13,9 +13,9 @@ from src.core.schemas import initial_story_state
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-AGENT32_HIGH = {"regression_risk": "HIGH", "recommended_suite": "FULL"}
-AGENT32_MEDIUM = {"regression_risk": "MEDIUM", "recommended_suite": "REGRESSION"}
-AGENT32_LOW = {"regression_risk": "LOW", "recommended_suite": "SMOKE"}
+AGENT32_HIGH = {"regression_risk_level": "HIGH", "recommended_regression_suite": "FULL"}
+AGENT32_MEDIUM = {"regression_risk_level": "MEDIUM", "recommended_regression_suite": "REGRESSION"}
+AGENT32_LOW = {"regression_risk_level": "LOW", "recommended_regression_suite": "SMOKE"}
 
 AGENT42_PASS = {"dry_run_success": True, "dry_run_verdict": "PASS"}
 AGENT42_FAIL = {"dry_run_success": False, "dry_run_verdict": "FAIL"}
@@ -75,6 +75,26 @@ class TestRunSmokeTests:
     def test_no_failures_in_passing_suite(self):
         _, _, failed, _, _ = _run_smoke_tests(AGENT32_LOW, AGENT42_PASS)
         assert failed == 0
+
+    def test_regression_risk_level_key_high_gives_full_suite(self):
+        """REQ-27: Agent 43 reads regression_risk_level (not regression_risk)."""
+        _, count, _, suite, _ = _run_smoke_tests(AGENT32_HIGH, AGENT42_PASS)
+        assert suite == "FULL"
+        assert count == 20
+
+    def test_regression_risk_level_key_medium_gives_regression_suite(self):
+        """REQ-27: Agent 43 reads recommended_regression_suite (not recommended_suite)."""
+        _, count, _, suite, _ = _run_smoke_tests(AGENT32_MEDIUM, AGENT42_PASS)
+        assert suite == "REGRESSION"
+        assert count == 10
+
+    def test_old_wrong_keys_default_to_smoke(self):
+        """REQ-27: Old keys regression_risk / recommended_suite must not be read."""
+        old_keys_data = {"regression_risk": "HIGH", "recommended_suite": "FULL"}
+        _, count, _, suite, _ = _run_smoke_tests(old_keys_data, AGENT42_PASS)
+        # Old keys not recognised → defaults to LOW/SMOKE
+        assert suite == "SMOKE"
+        assert count == 5
 
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────

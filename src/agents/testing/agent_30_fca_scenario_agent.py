@@ -104,6 +104,8 @@ Rules:
 3. LOW-FCA: Consumer Duty scenario plus any incidental COBS impact.
 4. Err on the side of MORE scenarios. If uncertain, include it.
 5. Every scenario needs observable pass/fail criteria.
+6. When vulnerable_customer_impact=True, generate ≥1 scenario with explicit FG21/1 reference
+   (e.g. "Customer with cognitive impairment receives appropriate product outcome").
 """.strip()
 
 _FCA_INSTRUCTIONS_PERMISSIVE = """
@@ -123,6 +125,8 @@ Rules:
 2. Do not add speculative or precautionary scenarios.
 3. For LOW-FCA stories with no FCA objects touched, return 0 scenarios and WARN.
 4. Every scenario needs observable pass/fail criteria.
+5. When vulnerable_customer_impact=True, an FG21/1 scenario is explicitly required —
+   generate at least one.
 """.strip()
 
 
@@ -132,7 +136,6 @@ async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent3_data = _get_agent_data(state, "3")
     agent4_data = _get_agent_data(state, "4")
-    agent5_data = _get_agent_data(state, "5")
     agent9_data = _get_agent_data(state, "9")
     agent19_data = _get_agent_data(state, "19")
 
@@ -140,11 +143,13 @@ async def run(state: StoryState) -> AgentResult:
 
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
     consumer_duty_risk = (agent4_data or {}).get("consumer_duty_risk", "LOW")
+    vulnerable_customer_impact = (agent4_data or {}).get("vulnerable_customer_impact", False)
     risk_level = (agent9_data or {}).get("risk_level", "LOW")
     existing_scenarios = (agent19_data or {}).get("gherkin_scenarios", [])
 
     user_message = _build_prompt(
         story_id, story, fca_class, consumer_duty_risk, risk_level, existing_scenarios,
+        vulnerable_customer_impact=vulnerable_customer_impact,
     )
 
     # Ensemble: permissive (Call A — minimum compliance) vs cautious (Call B — full protection)
@@ -184,8 +189,8 @@ async def run(state: StoryState) -> AgentResult:
     ta_pos, interaction_mode = classify_ta_interaction(call_a_conf, call_b_conf)
     ensemble_agreement = call_a_verdict == call_b_verdict
 
-    # Cautious call wins on disagreement (safer call wins — mirrors Agent 03)
-    result = call_b_result if not ensemble_agreement else call_b_result
+    # Cautious call wins on disagreement; permissive (minimum required) used when both agree
+    result = call_b_result if not ensemble_agreement else call_a_result
 
     fca_scenarios = result.get("fca_test_scenarios", [])
     consumer_duty = result.get("consumer_duty_covered", False)
@@ -290,18 +295,28 @@ def _build_prompt(
     consumer_duty_risk: str,
     risk_level: str,
     existing_scenarios: list,
+    vulnerable_customer_impact: bool = False,
 ) -> str:
     existing_titles = [s.get("title", "") for s in existing_scenarios[:5]]
+    existing_block = (
+        "\n".join(f"  - {t}" for t in existing_titles)
+        if existing_titles else "  none"
+    )
+    vc_line = (
+        "Vulnerable Customer Impact: TRUE — FG21/1 scenario is mandatory"
+        if vulnerable_customer_impact
+        else "Vulnerable Customer Impact: FALSE"
+    )
     return (
         f"Story: {story_id} — {story.get('summary', 'N/A')}\n"
         f"Description: {story.get('description', 'N/A')[:500]}\n"
         f"FCA Classification: {fca_class}\n"
         f"Consumer Duty risk: {consumer_duty_risk}\n"
+        f"{vc_line}\n"
         f"Risk anticipation level: {risk_level}\n"
         f"Existing Gherkin scenarios (for context, avoid duplication):\n"
-        + "\n".join(f"  - {t}" for t in existing_titles) if existing_titles
-        else "  none"
-        + f"\n\nGenerate FCA regulatory scenarios using the {_FCA_TOOL_NAME} tool."
+        f"{existing_block}\n\n"
+        f"Generate FCA regulatory scenarios using the {_FCA_TOOL_NAME} tool."
     )
 
 

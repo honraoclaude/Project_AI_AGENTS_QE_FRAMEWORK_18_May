@@ -96,6 +96,10 @@ Rules:
 5. Regulatory assertions must reference the FCA rule being tested
    (e.g. "Suitability assessment passes FCA COBS 9 requirement").
 6. If ACs are unavailable, set INCOMPLETE and explain in regulatory_assertions.
+7. If Vulnerable Customer profiles are provided, generate at least one UAT test case
+   per profile, marked regulatory_flag=true. Steps must reflect the specific vulnerability
+   type (e.g. cognitive impairment, financial difficulty) and verify that the system
+   supports appropriate outcomes under FCA FG21/1.
 """.strip()
 
 
@@ -114,9 +118,10 @@ async def run(state: StoryState) -> AgentResult:
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
     gherkin = (agent19_data or {}).get("gherkin_scenarios", [])
     vulnerable_profiles = (agent21_data or {}).get("vulnerable_profiles", [])
+    ac_clauses = (agent5_data or {}).get("ac_clauses", [])
 
     user_message = _build_prompt(
-        story_id, story, acs, fca_class, gherkin, vulnerable_profiles,
+        story_id, story, acs, fca_class, gherkin, vulnerable_profiles, ac_clauses=ac_clauses,
     )
 
     result = await call_with_tool(
@@ -135,8 +140,14 @@ async def run(state: StoryState) -> AgentResult:
     verdict = result.get("uat_verdict", "INCOMPLETE")
     reg_assertions = result.get("regulatory_assertions", [])
 
+    # REQ-20: deterministic CO escalation — HIGH-FCA always requires CO sign-off
+    if fca_class == "HIGH":
+        co_required = True
+    elif fca_class != "MEDIUM":
+        co_required = co_required  # LOW-FCA: accept LLM determination
+
     confidence_score, signals = _compute_confidence(
-        acs, agent3_data, agent19_data, test_count, fca_class, co_required,
+        acs, agent3_data, agent5_data, agent19_data, test_count, fca_class, co_required,
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
 
@@ -182,6 +193,7 @@ async def run(state: StoryState) -> AgentResult:
 def _compute_confidence(
     acs: list,
     agent3_data: dict | None,
+    agent5_data: dict | None,
     agent19_data: dict | None,
     test_count: int,
     fca_class: str,
@@ -196,6 +208,9 @@ def _compute_confidence(
 
     if agent3_data:
         scorer.add("fca_classification_available", True, +5)
+
+    if agent5_data:
+        scorer.add("refined_ac_clauses_available", True, +5)
 
     if agent19_data and agent19_data.get("scenario_count", 0) > 0:
         scorer.add("gherkin_context_available", True, +5)
@@ -221,10 +236,18 @@ def _build_prompt(
     fca_class: str,
     gherkin: list,
     vulnerable_profiles: list,
+    ac_clauses: list | None = None,
 ) -> str:
-    ac_text = "\n".join(
-        f"  AC{i+1}: {ac.get('description', str(ac))}" for i, ac in enumerate(acs)
-    ) or "  (no acceptance criteria available)"
+    # Prefer structured Agent 05 clauses; fall back to raw Jira ACs
+    if ac_clauses:
+        ac_text = "\n".join(
+            f"  AC{i+1} [{c.get('scenario_type', '')}]: {c.get('description', '')}"
+            for i, c in enumerate(ac_clauses)
+        )
+    else:
+        ac_text = "\n".join(
+            f"  AC{i+1}: {ac.get('description', str(ac))}" for i, ac in enumerate(acs)
+        ) or "  (no acceptance criteria available)"
     gherkin_titles = [s.get("title", "") for s in gherkin[:5]]
     return (
         f"Story: {story_id} — {story.get('summary', 'N/A')}\n"

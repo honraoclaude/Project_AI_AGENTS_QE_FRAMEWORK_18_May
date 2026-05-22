@@ -137,7 +137,6 @@ def _coordinate_uat(
 ) -> tuple[bool, bool, bool, str]:
     """Returns (sign_off_required, sign_off_received, request_sent, verdict)."""
     fca_class  = (agent3_data or {}).get("fca_classification", "LOW")
-    uat_verdict = (agent29_data or {}).get("uat_verdict", "PASS")
     co_required = (agent29_data or {}).get("co_sign_off_required", False)
     coverage_verdict = (agent33_data or {}).get("coverage_verdict", "PASS")
     defect_verdict   = (agent34_data or {}).get("defect_verdict", "PASS")

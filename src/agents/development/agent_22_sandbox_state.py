@@ -174,7 +174,7 @@ def _assess_sandbox_state(
             health_score -= 10
 
     # Metadata scope signal from Agent 13
-    scope_delta = (agent13_data or {}).get("scope_delta", [])
+    scope_delta = (agent13_data or {}).get("scope_delta_objects", [])
     depth = (agent13_data or {}).get("dependency_depth", 0)
 
     if scope_delta:
@@ -257,7 +257,7 @@ def _build_trace_message(
         f"Branch found: {(agent11_data or {}).get('branch_found', 'unknown')}\n"
         f"Branch stale: {(agent11_data or {}).get('branch_stale', 'unknown')}\n"
         f"SFDX verdict: {(agent17_data or {}).get('sfdx_verdict', 'unknown')}\n"
-        f"Metadata scope delta: {(agent13_data or {}).get('scope_delta', [])}\n"
+        f"Metadata scope delta: {(agent13_data or {}).get('scope_delta_objects', [])}\n"
         f"Sandbox health score: {health_score}/100\n"
         f"Blockers: {blockers or ['none']}\n"
         f"Verdict: {verdict}\n\n"

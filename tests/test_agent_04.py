@@ -390,6 +390,60 @@ class TestAgentRun:
         assert result.agent_id == 4
         assert result.data["agent3_available"] is False
 
+    async def test_ui_or_support_touch_in_output_data(self):
+        """REQ-02: ui_or_support_touch must be in output data (new field)."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_CD_HIGH_COMPLIANT
+            result = await run(state)
+
+        assert "ui_or_support_touch" in result.data, (
+            "ui_or_support_touch must be in output data for downstream Agent 09 consumption"
+        )
+        assert isinstance(result.data["ui_or_support_touch"], bool)
+
+    async def test_low_fca_with_ui_touch_not_not_applicable(self):
+        """REQ-02: LOW-FCA story that touches LWC/notification must not be NOT_APPLICABLE."""
+        state = initial_story_state("FSC-2500")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_LOW}
+
+        # LLM correctly identifies UI touch → consumer_understanding/support outcomes apply
+        mock_cd_ui_touch = {
+            **MOCK_CD_NOT_APPLICABLE,
+            "cd_verdict": "COMPLIANT",  # not NOT_APPLICABLE — has UI touch
+            "ui_or_support_touch": True,
+            "cd_outcomes_affected": ["consumer_understanding", "consumer_support"],
+        }
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_LABEL_CHANGE
+            mock_ac.return_value = []
+            mock_llm.return_value = mock_cd_ui_touch
+            result = await run(state)
+
+        assert result.data["ui_or_support_touch"] is True
+        assert result.data["cd_verdict"] != "NOT_APPLICABLE", (
+            "LOW-FCA story with UI touch must not be NOT_APPLICABLE"
+        )
+
     async def test_what_field_contains_story_id_and_verdict(self):
         state = initial_story_state("FSC-2417")
         state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}

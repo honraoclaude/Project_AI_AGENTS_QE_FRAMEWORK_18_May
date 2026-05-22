@@ -112,18 +112,25 @@ Rules:
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent3_data  = _get_agent_data(state, "3")
+    agent6_data  = _get_agent_data(state, "6")
     agent19_data = _get_agent_data(state, "19")
     agent21_data = _get_agent_data(state, "21")
-    agent24_data = _get_agent_data(state, "24")
     agent32_data = _get_agent_data(state, "32")
 
     gherkin_scenarios = (agent19_data or {}).get("gherkin_scenarios", [])
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
     seed_records = (agent21_data or {}).get("test_data_strategy", {}).get("seed_records", [])
     regression_suite = (agent32_data or {}).get("recommended_regression_suite", "SMOKE")
+    manual_test_present = "ManualTest" in (agent6_data or {}).get("test_tools", [])
+
+    scenarios_truncated = len(gherkin_scenarios) > 10
+    truncated_scenario_count = max(0, len(gherkin_scenarios) - 10)
 
     user_message = _build_prompt(
         story_id, fca_class, gherkin_scenarios, seed_records, regression_suite,
+        manual_test_present=manual_test_present,
+        scenarios_truncated=scenarios_truncated,
+        truncated_count=truncated_scenario_count,
     )
 
     result = await call_with_tool(
@@ -144,6 +151,8 @@ async def run(state: StoryState) -> AgentResult:
 
     confidence_score, signals = _compute_confidence(
         agent19_data, agent21_data, test_count, coverage, verdict,
+        scenarios_truncated=scenarios_truncated,
+        manual_test_present=manual_test_present,
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
 
@@ -160,6 +169,8 @@ async def run(state: StoryState) -> AgentResult:
         "crt_design_verdict": verdict,
         "design_notes": notes,
         "gherkin_scenario_count": len(gherkin_scenarios),
+        "scenarios_truncated": scenarios_truncated,
+        "truncated_scenario_count": truncated_scenario_count,
         "signals": signals,
     }
 
@@ -189,6 +200,8 @@ def _compute_confidence(
     test_count: int,
     coverage: float,
     verdict: str,
+    scenarios_truncated: bool = False,
+    manual_test_present: bool = False,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=68)
 
@@ -208,11 +221,14 @@ def _compute_confidence(
 
     if coverage >= 80:
         scorer.add("high_automation_coverage", coverage, +5)
-    elif coverage < 50 and scenario_count > 0:
+    elif coverage < 50 and scenario_count > 0 and not manual_test_present:
         scorer.add("low_automation_coverage", coverage, -5)
 
     if verdict == "INCOMPLETE":
         scorer.add("incomplete_design", True, -10)
+
+    if scenarios_truncated:
+        scorer.add("scenarios_truncated", True, -5)
 
     scorer.cap(92).floor(20)
     return scorer.build()
@@ -226,12 +242,27 @@ def _build_prompt(
     gherkin_scenarios: list,
     seed_records: list,
     regression_suite: str,
+    manual_test_present: bool = False,
+    scenarios_truncated: bool = False,
+    truncated_count: int = 0,
 ) -> str:
+    capped = gherkin_scenarios[:10]
     scenario_text = "\n".join(
         f"  Scenario {i+1}: [{', '.join(s.get('tags', []))}] {s.get('title', '')}\n"
         f"    Steps: {'; '.join(s.get('steps', []))}"
-        for i, s in enumerate(gherkin_scenarios[:10])
+        for i, s in enumerate(capped)
     ) or "  (no Gherkin scenarios available)"
+
+    truncation_note = (
+        f"NOTE: {truncated_count} scenario(s) omitted due to prompt length limit — "
+        f"acknowledge this gap in design_notes.\n"
+        if scenarios_truncated else ""
+    )
+    manual_note = (
+        "NOTE: ManualTest flag present — scenarios tagged @manual are deliberately not automated; "
+        "exclude them from automation_coverage calculation and note in design_notes.\n"
+        if manual_test_present else ""
+    )
 
     seed_names = [r.get("object_name", "") for r in seed_records]
 
@@ -240,6 +271,8 @@ def _build_prompt(
         f"FCA Classification: {fca_class}\n"
         f"Regression suite required: {regression_suite}\n"
         f"Available seed data objects: {seed_names or ['none']}\n"
+        f"{truncation_note}"
+        f"{manual_note}"
         f"Gherkin scenarios ({len(gherkin_scenarios)}):\n{scenario_text}\n\n"
         f"Design CRT test cases using the {_CRT_TOOL_NAME} tool."
     )

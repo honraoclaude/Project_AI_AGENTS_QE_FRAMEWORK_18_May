@@ -69,10 +69,11 @@ release engineer must do if problems are found.
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent8_data  = _get_agent_data(state, "8")
     agent13_data = _get_agent_data(state, "13")
     agent40_data = _get_agent_data(state, "40")
 
-    valid, issues, destructive, verdict = _check_integrity(agent13_data, agent40_data)
+    valid, issues, destructive, verdict = _check_integrity(agent8_data, agent13_data, agent40_data)
 
     trace_msg = _build_trace_message(story_id, valid, issues, destructive, verdict, agent40_data)
     trace = await _generate_trace(trace_msg)
@@ -117,23 +118,31 @@ async def run(state: StoryState) -> AgentResult:
 # ── Deterministic integrity check ─────────────────────────────────────────────
 
 def _check_integrity(
+    agent8_data: dict | None,
     agent13_data: dict | None,
     agent40_data: dict | None,
 ) -> tuple[bool, list[str], bool, str]:
     """Returns (valid, issues, destructive_changes_present, verdict)."""
     issues: list[str] = []
+    # REQ-26 Gap 3: typed flags prevent verdict from breaking when issue text changes
+    hard_issue_flags: set[str] = set()
 
     component_count  = (agent40_data or {}).get("component_count", 0)
+    # effective_count: component_count (sum of type counts, REQ-25) vs file count — same unit after REQ-25
     changed_files    = (agent13_data or {}).get("changed_files_count", 0)
     composer_verdict = (agent40_data or {}).get("composer_verdict", "COMPOSED")
     missing_deps     = (agent13_data or {}).get("missing_dependencies", [])
     destructive      = (agent13_data or {}).get("has_destructive_changes", False)
+    ext_deps         = (agent8_data or {}).get("has_external_dependencies", False)
+    components_summary = (agent40_data or {}).get("components_summary", {})
 
     if composer_verdict == "FAILED":
         issues.append("Release composer failed — no valid change set to validate")
+        hard_issue_flags.add("composer_failed")
 
     if missing_deps:
         issues.append(f"Missing dependencies detected: {missing_deps}")
+        hard_issue_flags.add("missing_deps")
 
     effective_count = max(component_count, changed_files)
     if effective_count > _LARGE_CHANGE_SET_THRESHOLD:
@@ -146,18 +155,15 @@ def _check_integrity(
     if destructive:
         issues.append("Destructive changes present — manual review required before deployment")
 
-    # Missing dependency or composer failure = FAIL; destructive/large = WARN
-    hard_failures = [i for i in issues if "composer failed" in i or "Missing dependencies" in i]
+    # REQ-26 Gap 2: external dependencies not in package → WARN
+    if ext_deps and "ExternalService" not in components_summary:
+        issues.append(
+            "External service dependencies detected but not in change set — "
+            "verify Named Credentials/Connected Apps are deployed to target org"
+        )
 
-    if hard_failures:
-        verdict = "FAIL"
-        valid = False
-    elif issues:
-        verdict = "WARN"
-        valid = True  # WARN is non-blocking
-    else:
-        verdict = "PASS"
-        valid = True
+    verdict = "FAIL" if hard_issue_flags else ("WARN" if issues else "PASS")
+    valid = not hard_issue_flags
 
     return valid, issues, destructive, verdict
 

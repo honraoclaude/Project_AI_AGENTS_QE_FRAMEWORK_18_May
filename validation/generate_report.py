@@ -38,6 +38,8 @@ VERDICT_COLOUR = {
     # Gray
     "SKIPPED": "gray", "UNKNOWN": "gray", "INCOMPLETE": "gray",
     "NO_ACTION_REQUIRED": "gray", "ALERT": "gray",
+    # Agent 45 coalition verdicts (Wave 5 game theory)
+    "UNANIMOUS_GO": "green", "DISSENT_NO_GO": "red",
     # Error
     "ERROR": "error",
 }
@@ -86,6 +88,7 @@ def _derive_verdict(result: dict) -> str:
         "readiness_verdict", "flaky_verdict", "uat_coordination_verdict",
         "rca_verdict", "defect_verdict", "coverage_verdict",
         "development_verdict", "invest_verdict", "fca_classification",
+        "story_ready_assessment",
     ]:
         if key in data:
             return str(data[key])
@@ -101,18 +104,36 @@ def _key_outputs(result: dict) -> list[tuple[str, str]]:
     items = []
     priority_keys = [
         "goal", "persona", "fsc_objects", "fca_classification",
+        # Agents 03 / 14 / 30 — ensemble + TA (Wave 2/3/4)
+        "ta_position", "interaction_mode", "ensemble_agreement",
         "invest_score", "invest_verdict", "dimension_scores",
         "ac_count", "ac_clauses",
+        # Agent 05 — mechanism design trust signal (Wave 3)
+        "generation_mode_trust",
         # Agent 05B (AC Challenger) game theory keys
         "ac_count_challenged", "survivor_count", "critical_weakness_count", "challenge_summary",
         "risk_level", "risk_rating", "risk_factors",
+        # Agent 09 — TA interaction summary (Wave 2)
+        "ta_interaction_summary",
         "coverage_verdict", "overall_coverage_pct", "gherkin_scenario_count",
+        # Agent 19 — Shapley attribution (Wave 3)
+        "shapley_attribution", "ac_source_trust",
+        # Agent 21 — mechanism design completeness (Wave 3)
+        "data_design_completeness",
         "defect_count", "critical_defects", "defect_verdict",
+        # Agent 34 — coalition severity voting (Wave 4)
+        "severity_votes", "minimax_escalated", "coalition_dissent",
+        # Agent 44 — TA-enhanced Shapley evidence summary (Wave 5)
+        "ta_evidence_summary",
         "go_decision", "coordinator_verdict", "no_go_reasons",
+        # Agent 45 — minimax loss analysis + coalition verdict (Wave 5)
+        "coalition_verdict", "minimax_loss_analysis",
         "rollback_verdict", "rollback_risk",
         "health_status", "monitoring_active",
         "agents_adjusted", "calibration_verdict",
         "incident_severity", "incident_verdict", "escalate_to",
+        # Agent 55 — 3 Amigos Facilitator
+        "story_ready_assessment", "open_questions", "recommended_decisions", "facilitator_summary",
         "narrative", "story_summary",
     ]
     seen = set()

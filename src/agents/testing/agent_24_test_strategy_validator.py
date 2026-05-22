@@ -139,6 +139,7 @@ def _validate_strategy(
 ) -> tuple[bool, str, list[str], bool]:
     """Returns (valid, verdict, gaps, fca_scenario_coverage)."""
     gaps: list[str] = []
+    critical_gap_flags: set[str] = set()
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
 
     # Minimum scenario requirement
@@ -153,6 +154,7 @@ def _validate_strategy(
             f"Insufficient Gherkin scenarios: {scenario_count} present, "
             f"{min_required} required for {fca_class}-FCA story"
         )
+        critical_gap_flags.add("insufficient_scenarios")
 
     # FCA coverage for regulated stories
     fca_covered = (agent19_data or {}).get("fca_coverage_present", False)
@@ -160,11 +162,40 @@ def _validate_strategy(
         gaps.append(
             f"FCA {fca_class} story missing negative/boundary Gherkin scenarios"
         )
+        critical_gap_flags.add("missing_fca_scenarios")
+
+    # Vulnerable Customer coverage check (REQ-16 / depends on REQ-03)
+    vc_coverage_present = (agent19_data or {}).get("vulnerable_customer_coverage_present", True)
+    # Read vc impact from Agent 04 via Agent 03 context (Agent 04 not directly available here,
+    # but Agent 21 receives it; check agent21 vulnerable_profiles as proxy)
+    agent4_vc_impact = False  # Agent 04 not in scope here; proxy via agent21 vulnerable_profiles
+    if agent21_data:
+        agent4_vc_impact = bool((agent21_data or {}).get("vulnerable_profiles"))
+    if fca_class in ("HIGH", "MEDIUM") and agent4_vc_impact and not vc_coverage_present:
+        gaps.append(
+            f"Vulnerable Customer scenario required (FG21/1) but not present in Gherkin coverage"
+        )
+        critical_gap_flags.add("missing_vc_scenario")
+
+    # Agent 06: coverage target vs scenario count check
+    if agent6_data:
+        coverage_target = agent6_data.get("coverage_target_pct", 0)
+        test_tools = agent6_data.get("test_tools", [])
+        manual_test_present = "ManualTest" in test_tools
+        if manual_test_present:
+            gaps.append(
+                "ManualTest flagged in test strategy — some scenarios are deliberately manual (informational, not a failure)"
+            )
+        if coverage_target >= 85 and scenario_count < 3:
+            gaps.append(
+                f"High coverage target ({coverage_target}%) but only {scenario_count} Gherkin scenario(s) — coverage may be insufficient"
+            )
 
     # Test data strategy
     data_verdict = (agent21_data or {}).get("data_verdict", "")
     if data_verdict == "INCOMPLETE":
         gaps.append("Test data strategy is INCOMPLETE — no seed records designed")
+        critical_gap_flags.add("incomplete_data_strategy")
     elif data_verdict == "WARN":
         gaps.append("Test data strategy has gaps — review required before execution")
 
@@ -179,16 +210,22 @@ def _validate_strategy(
     dev_verdict = (agent23_data or {}).get("development_verdict", "")
     if dev_verdict == "FAIL":
         gaps.append("Development phase FAILED — testing cannot begin until resolved")
+        critical_gap_flags.add("dev_phase_failed")
 
-    # Determine verdict
-    critical_gaps = [g for g in gaps if "FAILED" in g or "INCOMPLETE" in g
-                     or "missing negative" in g]
-    if critical_gaps:
-        verdict = "FAIL"
-        valid = False
+    # Determine verdict using typed flags (not string substring matching)
+    if critical_gap_flags - {"missing_vc_scenario"} or (
+        "missing_vc_scenario" in critical_gap_flags
+    ):
+        # missing_vc_scenario and insufficient_scenarios/missing_fca_scenarios/etc. all block
+        if critical_gap_flags:
+            verdict = "FAIL"
+            valid = False
+        else:
+            verdict = "WARN"
+            valid = True
     elif gaps:
         verdict = "WARN"
-        valid = True  # warn but don't block
+        valid = True
     else:
         verdict = "PASS"
         valid = True

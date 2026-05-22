@@ -58,8 +58,27 @@ _RETRO_TOOL_SCHEMA = {
         },
         "calibration_signals": {
             "type": "object",
-            "description": "Key → value pairs for the Learning Repository calibration.",
-            "additionalProperties": {"type": "string"},
+            "description": "Fixed calibration signals for the Learning Repository.",
+            "required": [
+                "coverage_above_threshold",
+                "defect_count",
+                "fca_evidence_complete",
+                "development_verdict_clean",
+                "go_decision_reached",
+                "production_healthy",
+            ],
+            "properties": {
+                "coverage_above_threshold":  {"type": "boolean"},
+                "defect_count":              {"type": "integer", "minimum": 0},
+                "fca_evidence_complete":     {"type": "boolean"},
+                "development_verdict_clean": {"type": "boolean"},
+                "go_decision_reached":       {"type": "boolean"},
+                "production_healthy":        {"type": "boolean"},
+                "flaky_test_count":          {"type": "integer", "minimum": 0},
+                "regression_risk_level":     {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+                "rca_complete":              {"type": "boolean"},
+            },
+            "additionalProperties": False,
         },
         "retrospective_verdict": {
             "type": "string",
@@ -80,9 +99,13 @@ You receive phase-level verdicts, coverage metrics, defect counts, and the final
 Go/No-Go decision. Generate:
 1. Lessons learned: what worked well and what didn't across phases.
 2. Process improvements: specific, actionable recommendations for the next sprint.
-3. Calibration signals: quantitative signals for the Learning Repository
-   (e.g. "coverage_above_threshold": "true", "defect_count": "0",
-   "fca_evidence_complete": "true").
+3. Calibration signals: populate the REQUIRED fixed keys from the data provided:
+   - coverage_above_threshold (bool): true if coverage_verdict=PASS
+   - defect_count (int): actual defect count from the defect report
+   - fca_evidence_complete (bool): true if evidence_verdict=COMPLETE
+   - development_verdict_clean (bool): true if development_verdict=PASS
+   - go_decision_reached (bool): true if go_decision=true
+   - production_healthy (bool): true if prod_verdict=HEALTHY or PASS
 
 Be concise and specific. Focus on signals that will help calibrate agent confidence
 thresholds. If little data is available, return retrospective_verdict=PARTIAL.
@@ -97,12 +120,13 @@ async def run(state: StoryState) -> AgentResult:
     agent33_data = _get_agent_data(state, "33")
     agent34_data = _get_agent_data(state, "34")
     agent39_data = _get_agent_data(state, "39")
+    agent44_data = _get_agent_data(state, "44")
     agent45_data = _get_agent_data(state, "45")
     agent46_data = _get_agent_data(state, "46")
 
     retro_msg = _build_retro_message(
         story_id, agent23_data, agent33_data, agent34_data,
-        agent39_data, agent45_data, agent46_data,
+        agent39_data, agent44_data, agent45_data, agent46_data,
     )
     result_data = await _run_retro(retro_msg)
 
@@ -191,24 +215,27 @@ def _build_retro_message(
     agent33_data: dict | None,
     agent34_data: dict | None,
     agent39_data: dict | None,
+    agent44_data: dict | None,
     agent45_data: dict | None,
     agent46_data: dict | None,
 ) -> str:
-    dev_verdict   = (agent23_data or {}).get("development_verdict", "UNKNOWN")
-    coverage_pct  = (agent33_data or {}).get("overall_coverage_pct", 0.0)
-    cov_verdict   = (agent33_data or {}).get("coverage_verdict", "UNKNOWN")
-    defect_count  = (agent34_data or {}).get("defect_count", 0)
-    def_verdict   = (agent34_data or {}).get("defect_verdict", "UNKNOWN")
-    readiness     = (agent39_data or {}).get("readiness_verdict", "UNKNOWN")
-    go_decision   = (agent45_data or {}).get("go_decision", False)
-    go_verdict    = (agent45_data or {}).get("coordinator_verdict", "UNKNOWN")
-    prod_verdict  = (agent46_data or {}).get("prod_verdict", "UNKNOWN")
+    dev_verdict    = (agent23_data or {}).get("development_verdict", "UNKNOWN")
+    coverage_pct   = (agent33_data or {}).get("overall_coverage_pct", 0.0)
+    cov_verdict    = (agent33_data or {}).get("coverage_verdict", "UNKNOWN")
+    defect_count   = (agent34_data or {}).get("defect_count", 0)
+    def_verdict    = (agent34_data or {}).get("defect_verdict", "UNKNOWN")
+    readiness      = (agent39_data or {}).get("readiness_verdict", "UNKNOWN")
+    evidence_vert  = (agent44_data or {}).get("evidence_verdict", "UNKNOWN")
+    go_decision    = (agent45_data or {}).get("go_decision", False)
+    go_verdict     = (agent45_data or {}).get("coordinator_verdict", "UNKNOWN")
+    prod_verdict   = (agent46_data or {}).get("prod_verdict", "UNKNOWN")
 
     return (
         f"Story: {story_id}\n\n"
         f"Development phase verdict: {dev_verdict}\n"
         f"Test coverage: {coverage_pct:.1f}%, verdict={cov_verdict}\n"
         f"Defects found: {defect_count}, verdict={def_verdict}\n"
+        f"FCA evidence verdict: {evidence_vert}\n"
         f"Release readiness: {readiness}\n"
         f"Go/No-Go: {go_verdict} (go={go_decision})\n"
         f"Production: {prod_verdict}\n\n"

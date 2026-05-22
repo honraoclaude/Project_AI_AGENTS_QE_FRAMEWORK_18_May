@@ -77,7 +77,6 @@ async def render_signoff(token: str, decision: str | None = None) -> HTMLRespons
     payload = _verify_token(token)
     story_id = payload["sid"]
     gate_id = payload["gate"]
-    role = payload["email"]
     action_type = payload["type"]
 
     trace = await qds.get_story_trace(story_id)

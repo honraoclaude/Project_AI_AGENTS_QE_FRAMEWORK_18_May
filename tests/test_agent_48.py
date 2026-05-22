@@ -41,85 +41,85 @@ MOCK_TRACE_MEDIUM = {
 
 class TestAssessRollback:
     def test_no_data_gives_low_risk_feasible(self):
-        feasible, risk, steps, verdict = _assess_rollback(None, None)
+        feasible, risk, steps, verdict = _assess_rollback(None, None, None, None)
         assert feasible is True
         assert risk == "LOW"
         assert verdict == "FEASIBLE"
 
     def test_clean_change_gives_feasible(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_PASS)
         assert feasible is True
         assert risk == "LOW"
         assert verdict == "FEASIBLE"
 
     def test_destructive_no_deps_gives_risky(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_DESTRUCTIVE, None, AGENT41_PASS)
         assert feasible is True
         assert risk == "MEDIUM"
         assert verdict == "RISKY"
 
     def test_destructive_depth_1_gives_risky(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_SHALLOW, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_DESTRUCTIVE_SHALLOW, None, AGENT41_PASS)
         assert feasible is True
         assert risk == "MEDIUM"
         assert verdict == "RISKY"
 
     def test_destructive_depth_2_gives_not_feasible(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_MEDIUM, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_DESTRUCTIVE_MEDIUM, None, AGENT41_PASS)
         assert feasible is False
         assert risk == "HIGH"
         assert verdict == "NOT_FEASIBLE"
 
     def test_destructive_depth_3_gives_not_feasible(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DESTRUCTIVE_DEEP, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_DESTRUCTIVE_DEEP, None, AGENT41_PASS)
         assert feasible is False
         assert risk == "HIGH"
         assert verdict == "NOT_FEASIBLE"
 
     def test_deep_deps_no_destructive_gives_risky(self):
-        feasible, risk, steps, verdict = _assess_rollback(AGENT13_DEEP_DEPS, AGENT41_PASS)
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_DEEP_DEPS, None, AGENT41_PASS)
         assert feasible is True
         assert risk == "MEDIUM"
         assert verdict == "RISKY"
 
     def test_depth_3_no_destructive_gives_risky(self):
         data = {"has_destructive_changes": False, "dependency_depth": 3}
-        feasible, risk, steps, verdict = _assess_rollback(data, None)
+        feasible, risk, steps, verdict = _assess_rollback(None, data, None, None)
         assert feasible is True
         assert verdict == "RISKY"
         assert risk == "MEDIUM"
 
     def test_depth_2_no_destructive_gives_feasible(self):
         data = {"has_destructive_changes": False, "dependency_depth": 2}
-        feasible, risk, steps, verdict = _assess_rollback(data, None)
+        feasible, risk, steps, verdict = _assess_rollback(None, data, None, None)
         assert feasible is True
         assert risk == "LOW"
         assert verdict == "FEASIBLE"
 
     def test_steps_always_include_base_step(self):
-        _, _, steps, _ = _assess_rollback(AGENT13_CLEAN, None)
+        _, _, steps, _ = _assess_rollback(None, AGENT13_CLEAN, None, None)
         assert any("Copado" in s for s in steps)
 
     def test_destructive_adds_restore_steps(self):
-        _, _, steps, _ = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        _, _, steps, _ = _assess_rollback(None, AGENT13_DESTRUCTIVE, None, AGENT41_PASS)
         assert any("deleted metadata" in s.lower() for s in steps)
         assert any("data integrity" in s.lower() for s in steps)
 
     def test_deep_deps_adds_dependency_review_step(self):
-        _, _, steps, _ = _assess_rollback(AGENT13_DEEP_DEPS, AGENT41_PASS)
+        _, _, steps, _ = _assess_rollback(None, AGENT13_DEEP_DEPS, None, AGENT41_PASS)
         assert any("dependency" in s.lower() for s in steps)
 
     def test_clean_change_has_minimal_steps(self):
-        _, _, steps, _ = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        _, _, steps, _ = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_PASS)
         assert len(steps) == 1
 
     def test_destructive_deep_has_most_steps(self):
-        _, _, steps_max, _ = _assess_rollback(AGENT13_DESTRUCTIVE_DEEP, AGENT41_PASS)
-        _, _, steps_min, _ = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        _, _, steps_max, _ = _assess_rollback(None, AGENT13_DESTRUCTIVE_DEEP, None, AGENT41_PASS)
+        _, _, steps_min, _ = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_PASS)
         assert len(steps_max) > len(steps_min)
 
     def test_returns_tuple_of_four(self):
-        result = _assess_rollback(AGENT13_CLEAN, AGENT41_PASS)
+        result = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_PASS)
         assert len(result) == 4
         feasible, risk, steps, verdict = result
         assert isinstance(feasible, bool)
@@ -128,8 +128,8 @@ class TestAssessRollback:
         assert isinstance(verdict, str)
 
     def test_feasible_is_false_only_for_high_risk(self):
-        _, _, _, verdict_high = _assess_rollback(AGENT13_DESTRUCTIVE_MEDIUM, AGENT41_PASS)
-        _, _, _, verdict_medium = _assess_rollback(AGENT13_DESTRUCTIVE, AGENT41_PASS)
+        _, _, _, verdict_high = _assess_rollback(None, AGENT13_DESTRUCTIVE_MEDIUM, None, AGENT41_PASS)
+        _, _, _, verdict_medium = _assess_rollback(None, AGENT13_DESTRUCTIVE, None, AGENT41_PASS)
         assert verdict_high == "NOT_FEASIBLE"
         assert verdict_medium == "RISKY"
 
@@ -289,3 +289,67 @@ class TestAgentRun:
             result = await run(state)
 
         assert isinstance(result.confidence.escalated, bool)
+
+
+# ── REQ-31: new tests ─────────────────────────────────────────────────────────
+
+AGENT8_EXT_DEPS    = {"has_external_dependencies": True}
+AGENT8_NO_EXT_DEPS = {"has_external_dependencies": False}
+AGENT40_MAJOR      = {"release_type": "MAJOR"}
+AGENT40_PATCH      = {"release_type": "PATCH"}
+
+
+class TestREQ31IntegrityFailElevatesRisk:
+    def test_integrity_fail_elevates_to_medium_from_low(self):
+        feasible, risk, steps, verdict = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_FAIL)
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_integrity_fail_adds_step(self):
+        _, _, steps, _ = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_FAIL)
+        assert any("integrity" in s.lower() for s in steps)
+
+    def test_integrity_pass_clean_stays_feasible(self):
+        feasible, risk, _, verdict = _assess_rollback(None, AGENT13_CLEAN, None, AGENT41_PASS)
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+
+class TestREQ31ExternalDepsElevatesRisk:
+    def test_external_deps_elevates_to_medium(self):
+        feasible, risk, steps, verdict = _assess_rollback(AGENT8_EXT_DEPS, AGENT13_CLEAN, None, AGENT41_PASS)
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_external_deps_adds_step_about_named_credentials(self):
+        _, _, steps, _ = _assess_rollback(AGENT8_EXT_DEPS, AGENT13_CLEAN, None, AGENT41_PASS)
+        assert any("external" in s.lower() or "named credential" in s.lower() for s in steps)
+
+    def test_no_external_deps_clean_stays_feasible(self):
+        _, risk, _, verdict = _assess_rollback(AGENT8_NO_EXT_DEPS, AGENT13_CLEAN, None, AGENT41_PASS)
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+
+class TestREQ31MajorReleaseElevatesRisk:
+    def test_major_release_elevates_to_medium(self):
+        _, risk, _, verdict = _assess_rollback(None, AGENT13_CLEAN, AGENT40_MAJOR, AGENT41_PASS)
+        assert risk == "MEDIUM"
+        assert verdict == "RISKY"
+
+    def test_major_release_adds_schema_step(self):
+        _, _, steps, _ = _assess_rollback(None, AGENT13_CLEAN, AGENT40_MAJOR, AGENT41_PASS)
+        assert any("schema" in s.lower() or "migration" in s.lower() for s in steps)
+
+    def test_patch_release_stays_feasible(self):
+        _, risk, _, verdict = _assess_rollback(None, AGENT13_CLEAN, AGENT40_PATCH, AGENT41_PASS)
+        assert risk == "LOW"
+        assert verdict == "FEASIBLE"
+
+
+class TestREQ31ExistingBehaviourPreserved:
+    def test_destructive_plus_deps_2_still_not_feasible(self):
+        feasible, risk, _, verdict = _assess_rollback(None, AGENT13_DESTRUCTIVE_MEDIUM, None, AGENT41_PASS)
+        assert feasible is False
+        assert risk == "HIGH"
+        assert verdict == "NOT_FEASIBLE"

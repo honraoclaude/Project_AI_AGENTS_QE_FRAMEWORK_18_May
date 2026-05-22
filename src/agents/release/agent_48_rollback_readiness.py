@@ -68,15 +68,17 @@ and recommended rollback steps for the operations team.
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent8_data  = _get_agent_data(state, "8")
     agent13_data = _get_agent_data(state, "13")
+    agent40_data = _get_agent_data(state, "40")
     agent41_data = _get_agent_data(state, "41")
 
-    feasible, risk, steps, verdict = _assess_rollback(agent13_data, agent41_data)
+    feasible, risk, steps, verdict = _assess_rollback(agent8_data, agent13_data, agent40_data, agent41_data)
 
     trace_msg = _build_trace_message(story_id, feasible, risk, steps, verdict)
     trace = await _generate_trace(trace_msg)
 
-    confidence_score, signals = _compute_confidence(agent13_data, agent41_data)
+    confidence_score, signals = _compute_confidence(agent13_data, agent41_data, agent8_data, agent40_data)
     escalated = confidence_score < settings.confidence_escalation_threshold
 
     what = f"Rollback readiness for {story_id}: feasible={feasible}, risk={risk} — verdict={verdict}"
@@ -113,13 +115,18 @@ async def run(state: StoryState) -> AgentResult:
 # ── Deterministic rollback assessment ────────────────────────────────────────
 
 def _assess_rollback(
+    agent8_data: dict | None,
     agent13_data: dict | None,
+    agent40_data: dict | None,
     agent41_data: dict | None,
 ) -> tuple[bool, str, list[str], str]:
     """Returns (feasible, risk_level, steps, verdict)."""
-    destructive   = (agent13_data or {}).get("has_destructive_changes", False)
-    dep_depth     = (agent13_data or {}).get("dependency_depth", 0)
-    int_verdict   = (agent41_data or {}).get("integrity_verdict", "PASS")
+    destructive       = (agent13_data or {}).get("has_destructive_changes", False)
+    dep_depth         = (agent13_data or {}).get("dependency_depth", 0)
+    has_external_deps = (agent8_data or {}).get("has_external_dependencies", False)
+    release_type      = (agent40_data or {}).get("release_type", "PATCH")
+    integrity_verdict = (agent41_data or {}).get("integrity_verdict", "PASS")
+    integrity_issues  = (agent41_data or {}).get("integrity_issues", [])
 
     steps = ["Deploy previous change set version via Copado"]
 
@@ -130,12 +137,27 @@ def _assess_rollback(
     if dep_depth >= 3:
         steps.append("Review cross-object dependency chain before rollback")
 
+    # REQ-31 Gap 1: integrity issues from Agent 41 increase rollback risk
+    if integrity_verdict == "FAIL":
+        steps.append("Resolve change set integrity issues before attempting rollback")
+
+    # REQ-31 Gap 2: external dependencies are hard to roll back
+    if has_external_deps:
+        steps.append(
+            "Verify external service configuration (Named Credentials/Connected Apps) "
+            "in target org before rollback — metadata revert does not undo external state"
+        )
+
+    # REQ-31 Gap 3: MAJOR release (schema change) increases rollback complexity
+    if release_type == "MAJOR":
+        steps.append("Schema change present — data migration may be required before rollback")
+
     # Risk assessment
     if destructive and dep_depth >= 2:
         risk = "HIGH"
         feasible = False
         verdict = "NOT_FEASIBLE"
-    elif destructive or dep_depth >= 3:
+    elif destructive or dep_depth >= 3 or integrity_verdict == "FAIL" or has_external_deps or release_type == "MAJOR":
         risk = "MEDIUM"
         feasible = True
         verdict = "RISKY"
@@ -144,6 +166,7 @@ def _assess_rollback(
         feasible = True
         verdict = "FEASIBLE"
 
+    # NOT_FEASIBLE is informational — future Gate G12 could enforce this
     return feasible, risk, steps, verdict
 
 
@@ -152,6 +175,8 @@ def _assess_rollback(
 def _compute_confidence(
     agent13_data: dict | None,
     agent41_data: dict | None,
+    agent8_data: dict | None = None,
+    agent40_data: dict | None = None,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=55)
 

@@ -82,49 +82,49 @@ MOCK_TRACE = {
 
 class TestDependencyAnalysis:
     def test_suitability_story_detects_key_objects(self):
-        detected, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
+        detected, _, _, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         assert "suitability__c" in detected
         assert "riskprofile__c" in detected
         assert "financialaccount" in detected
 
     def test_suitability_story_implies_individual(self):
-        _, implied, _, _ = _analyse_dependencies(STORY_SUITABILITY)
+        _, implied, _, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         assert "individual" not in implied   # individual is excluded from implied (too generic)
         # individual appears in the dependency map but is excluded from implied list
         # (it's filtered as a base object in _analyse_dependencies)
 
     def test_label_change_detects_no_fsc_objects(self):
-        detected, implied, _, depth = _analyse_dependencies(STORY_LABEL_CHANGE)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_LABEL_CHANGE)
         assert len(detected) == 0
         assert len(implied) == 0
         assert depth == 0
 
     def test_financial_story_detects_financial_objects(self):
-        detected, _, _, _ = _analyse_dependencies(STORY_FINANCIAL)
+        detected, _, _, _, _, _ = _analyse_dependencies(STORY_FINANCIAL)
         assert "financialaccount" in detected
         assert "financialholding" in detected
 
     def test_dependency_depth_nonzero_for_suitability(self):
-        _, _, _, depth = _analyse_dependencies(STORY_SUITABILITY)
+        _, _, _, depth, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         assert depth >= 1
 
     def test_dependency_depth_zero_for_label_change(self):
-        _, _, _, depth = _analyse_dependencies(STORY_LABEL_CHANGE)
+        _, _, _, depth, _, _ = _analyse_dependencies(STORY_LABEL_CHANGE)
         assert depth == 0
 
     def test_dependency_graph_contains_detected_objects(self):
-        detected, _, graph, _ = _analyse_dependencies(STORY_SUITABILITY)
+        detected, _, graph, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         for obj in detected:
             assert obj in graph
 
     def test_vulnerable_customer_detected_by_alias(self):
-        detected, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
+        detected, _, _, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         assert "vulnerablecustomerindicator__c" in detected
 
     def test_analysis_is_case_insensitive(self):
         upper_story = {**STORY_SUITABILITY, "description": STORY_SUITABILITY["description"].upper()}
-        detected_upper, _, _, _ = _analyse_dependencies(upper_story)
-        detected_lower, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
+        detected_upper, _, _, _, _, _ = _analyse_dependencies(upper_story)
+        detected_lower, _, _, _, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         assert set(detected_upper) == set(detected_lower)
 
 
@@ -132,34 +132,34 @@ class TestDependencyAnalysis:
 
 class TestConfidenceScoring:
     def test_suitability_story_high_confidence(self):
-        detected, implied, _, depth = _analyse_dependencies(STORY_SUITABILITY)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         score, _ = _compute_confidence(STORY_SUITABILITY, detected, implied, depth)
         assert score >= 75, "Rich multi-object story should score ≥ 75"
 
     def test_label_change_lower_confidence(self):
-        detected, implied, _, depth = _analyse_dependencies(STORY_LABEL_CHANGE)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_LABEL_CHANGE)
         score, _ = _compute_confidence(STORY_LABEL_CHANGE, detected, implied, depth)
         assert score < 75, "Story with no FSC objects should score lower"
 
     def test_no_objects_heavily_penalised(self):
-        detected, implied, _, depth = _analyse_dependencies(STORY_LABEL_CHANGE)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_LABEL_CHANGE)
         score, signals = _compute_confidence(STORY_LABEL_CHANGE, detected, implied, depth)
         assert "no_objects_detected" in signals
 
     def test_score_never_exceeds_92(self):
-        detected, implied, _, depth = _analyse_dependencies(STORY_SUITABILITY)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         score, _ = _compute_confidence(STORY_SUITABILITY, detected, implied, depth)
         assert score <= 92
 
     def test_score_never_below_20(self):
         empty_story = {**STORY_LABEL_CHANGE, "description": ""}
-        detected, implied, _, depth = _analyse_dependencies(empty_story)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(empty_story)
         score, _ = _compute_confidence(empty_story, detected, implied, depth)
         assert score >= 20
 
     def test_high_base_score_reflects_deterministic_nature(self):
         """Augmented Script uses base=72 — should score higher than Tier B agents on same input."""
-        detected, implied, _, depth = _analyse_dependencies(STORY_SUITABILITY)
+        detected, implied, _, depth, _, _ = _analyse_dependencies(STORY_SUITABILITY)
         score, _ = _compute_confidence(STORY_SUITABILITY, detected, implied, depth)
         assert score >= 72, "Base score for deterministic analysis should be high"
 
@@ -251,3 +251,100 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-06: platform_event + external_service detection tests ─────────────────
+
+STORY_PLATFORM_EVENT = {
+    "story_id": "FSC-3001",
+    "summary": "Publish Platform Event on suitability update",
+    "description": (
+        "When a Suitability__c record is updated, publish a platform event "
+        "to the EventBus so downstream consumers can trigger async processing."
+    ),
+    "status": "Sprint Ready",
+    "issue_type": "Story",
+    "priority": "Medium",
+    "labels": [],
+    "components": ["Integration"],
+    "assignee": "dev@firm.com",
+    "reporter": "po@firm.com",
+}
+
+STORY_EXTERNAL_SERVICE = {
+    "story_id": "FSC-3002",
+    "summary": "Retrieve AUM data via Named Credential callout",
+    "description": (
+        "As a Wealth Adviser, I want the system to perform an HTTP callout "
+        "using a Named Credential to retrieve AUM data from the external data feed provider."
+    ),
+    "status": "Sprint Ready",
+    "issue_type": "Story",
+    "priority": "Medium",
+    "labels": [],
+    "components": ["Integration"],
+    "assignee": "dev@firm.com",
+    "reporter": "po@firm.com",
+}
+
+
+class TestIntegrationPatternDetectionREQ06:
+    def test_platform_event_keyword_detected(self):
+        """REQ-06: 'platform event' in story text → platform_event in dep_types."""
+        _, _, _, _, has_ext, dep_types = _analyse_dependencies(STORY_PLATFORM_EVENT)
+        assert has_ext is True
+        assert "platform_event" in dep_types
+
+    def test_external_service_keyword_detected(self):
+        """REQ-06: 'named credential' + 'http callout' → external_service in dep_types."""
+        _, _, _, _, has_ext, dep_types = _analyse_dependencies(STORY_EXTERNAL_SERVICE)
+        assert has_ext is True
+        assert "external_service" in dep_types
+
+    def test_no_integration_patterns_for_standard_story(self):
+        """REQ-06: Standard FSC story without integration keywords → has_external_dependencies=False."""
+        _, _, _, _, has_ext, dep_types = _analyse_dependencies(STORY_SUITABILITY)
+        assert has_ext is False
+        assert dep_types == []
+
+    def test_no_ext_deps_for_label_change(self):
+        """REQ-06: Pure UI label change has no integration patterns."""
+        _, _, _, _, has_ext, _ = _analyse_dependencies(STORY_LABEL_CHANGE)
+        assert has_ext is False
+
+
+@pytest.mark.asyncio
+class TestExternalDepsIntegrationREQ06:
+    async def test_has_external_dependencies_in_run_output(self):
+        """REQ-06: run() emits has_external_dependencies in result.data."""
+        state = initial_story_state("FSC-3002")
+
+        with (
+            patch("src.agents.refinement.agent_08_dependency_mapping.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_08_dependency_mapping.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_EXTERNAL_SERVICE
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert "has_external_dependencies" in result.data
+        assert result.data["has_external_dependencies"] is True
+
+    async def test_detected_dependency_types_in_output(self):
+        """REQ-06: run() emits detected_dependency_types list in result.data."""
+        state = initial_story_state("FSC-3002")
+
+        with (
+            patch("src.agents.refinement.agent_08_dependency_mapping.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_08_dependency_mapping.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_EXTERNAL_SERVICE
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert "detected_dependency_types" in result.data
+        assert "external_service" in result.data["detected_dependency_types"]

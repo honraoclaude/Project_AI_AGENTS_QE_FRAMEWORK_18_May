@@ -323,6 +323,27 @@ class TestAgentRun:
         assert result.agent_id == 13
         assert result.data["detected_objects"] == []
 
+    async def test_changed_files_list_in_output_data(self):
+        """REQ-10: Agent 13 must emit full changed_files list, not just count."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_SUITABILITY
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert "changed_files" in result.data, "changed_files list must be in output data"
+        assert isinstance(result.data["changed_files"], list)
+        assert len(result.data["changed_files"]) == len(CHANGED_FILES_SUITABILITY)
+
     async def test_uses_fast_model(self):
         state = initial_story_state("FSC-2417")
 

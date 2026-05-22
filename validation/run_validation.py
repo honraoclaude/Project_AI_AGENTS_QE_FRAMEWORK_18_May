@@ -2,7 +2,7 @@
 FSC Agentic QE Framework — Pipeline Validation Runner
 ======================================================
 
-Runs all 54 agents against a realistic sample FSC Wealth Management story.
+Runs all 55 agents against a realistic sample FSC Wealth Management story.
 Saves each agent's output as JSON, then generates an HTML report.
 
 Usage:
@@ -98,12 +98,13 @@ AGENT_META: dict[int, dict] = {
     51: {"name": "Agent Health Monitor",        "phase": "Monitoring",  "class": "Augmented Script"},
     52: {"name": "Severity Calibration Agent",  "phase": "Monitoring",  "class": "Augmented Script"},
     53: {"name": "Incident Response Agent",     "phase": "Monitoring",  "class": "True AI"},
+    55: {"name": "3 Amigos Facilitator",         "phase": "Refinement",  "class": "True AI"},
 }
 
 # ── Execution batches (preserves dependency order) ────────────────────────────
 EXECUTION_PLAN: list[list[int]] = [
-    # Refinement (54=AC Challenger runs after Agent 5, before Agent 9)
-    [1, 8], [2, 3, 7], [4], [5], [54, 6], [9],
+    # Refinement (54=AC Challenger after Agent 5; 55=3 Amigos Facilitator after Agent 9)
+    [1, 8], [2, 3, 7], [4], [5], [54, 6], [9], [55],
     # Development
     [10, 11, 13], [12, 14, 15, 16], [17, 18], [19], [20, 21], [22], [23],
     # Testing
@@ -582,6 +583,7 @@ def _module_path(agent_id: int) -> str:
         52: "agent_52_severity_calibration",
         53: "agent_53_incident_response",
         54: "agent_05b_ac_challenger",
+        55: "agent_55_3_amigos_facilitator",
     }
     return f"src.agents.{pkg}.{overrides[agent_id]}"
 

@@ -126,6 +126,7 @@ async def run(state: StoryState) -> AgentResult:
     )
 
     data = {
+        "changed_files": changed_files,
         "changed_files_count": len(changed_files),
         "detected_objects": detected,
         "implied_objects": implied,

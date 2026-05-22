@@ -47,6 +47,25 @@ AGENT21_INCOMPLETE = {
     "vulnerable_profiles": [],
 }
 
+AGENT6_MANUAL_TEST = {
+    "test_tools": ["CRT", "ManualTest"],
+    "coverage_target_pct": 75,
+    "crt_recommended_count": 5,
+}
+
+AGENT6_HIGH_COVERAGE = {
+    "test_tools": ["CRT"],
+    "coverage_target_pct": 90,
+    "crt_recommended_count": 8,
+}
+
+AGENT19_FULL_WITH_VC = {
+    "scenario_count": 5,
+    "fca_coverage_present": True,
+    "gherkin_verdict": "PASS",
+    "vulnerable_customer_coverage_present": True,
+}
+
 AGENT23_PASS = {"development_verdict": "PASS", "critical_failures": []}
 AGENT23_FAIL = {"development_verdict": "FAIL", "critical_failures": ["Coverage FAIL"]}
 
@@ -192,3 +211,66 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-16: Agent 06 wiring + VC coverage check ───────────────────────────────
+
+class TestAgentSixAndVCCoverageREQ16:
+    def test_manual_test_in_agent6_gives_informational_note_not_fail(self):
+        """ManualTest in test_tools → informational gap, strategy still PASS if otherwise clean."""
+        valid, verdict, gaps, _ = _validate_strategy(
+            AGENT3_LOW, AGENT6_MANUAL_TEST, AGENT19_FULL, AGENT21_PASS, AGENT23_PASS
+        )
+        manual_notes = [g for g in gaps if "ManualTest" in g or "manual" in g.lower()]
+        assert len(manual_notes) >= 1
+        # ManualTest note is informational only — no FAIL
+        assert verdict != "FAIL"
+        assert valid is True
+
+    def test_high_coverage_target_with_few_scenarios_adds_gap(self):
+        """coverage_target ≥ 85 + <3 scenarios → gap added."""
+        agent19_few = {"scenario_count": 2, "fca_coverage_present": True, "gherkin_verdict": "PASS",
+                       "vulnerable_customer_coverage_present": False}
+        _, _, gaps, _ = _validate_strategy(
+            AGENT3_LOW, AGENT6_HIGH_COVERAGE, agent19_few, AGENT21_PASS, AGENT23_PASS
+        )
+        coverage_gaps = [g for g in gaps if "coverage" in g.lower() and "target" in g.lower()]
+        assert len(coverage_gaps) >= 1
+
+    def test_high_fca_vc_impact_vc_coverage_missing_is_critical(self):
+        """HIGH-FCA + vulnerable_customer_impact + vc_coverage_present=False → FAIL."""
+        agent19_no_vc = {
+            "scenario_count": 5,
+            "fca_coverage_present": True,
+            "gherkin_verdict": "PASS",
+            "vulnerable_customer_coverage_present": False,
+        }
+        agent21_with_vc_profiles = {**AGENT21_PASS, "vulnerable_profiles": ["VCI_01"]}
+        valid, verdict, gaps, _ = _validate_strategy(
+            AGENT3_HIGH, None, agent19_no_vc, agent21_with_vc_profiles, AGENT23_PASS
+        )
+        assert verdict == "FAIL"
+        assert valid is False
+        vc_gaps = [g for g in gaps if "Vulnerable Customer" in g and "scenario" in g.lower()]
+        assert len(vc_gaps) >= 1
+
+    def test_vc_coverage_present_does_not_add_vc_gap(self):
+        """HIGH-FCA + vc_coverage_present=True → no VC scenario gap."""
+        agent21_with_vc = {**AGENT21_PASS, "vulnerable_profiles": ["VCI_01"]}
+        _, _, gaps, _ = _validate_strategy(
+            AGENT3_HIGH, None, AGENT19_FULL_WITH_VC, agent21_with_vc, AGENT23_PASS
+        )
+        vc_scenario_gaps = [g for g in gaps if "FG21/1" in g]
+        assert len(vc_scenario_gaps) == 0
+
+    def test_low_fca_vc_impact_not_critical(self):
+        """LOW-FCA: VC coverage missing is not a FAIL (FCA tier doesn't require it)."""
+        agent19_no_vc = {
+            "scenario_count": 2, "fca_coverage_present": False,
+            "gherkin_verdict": "PASS", "vulnerable_customer_coverage_present": False,
+        }
+        # LOW FCA doesn't trigger VC check
+        valid, verdict, gaps, _ = _validate_strategy(
+            AGENT3_LOW, None, agent19_no_vc, AGENT21_PASS, AGENT23_PASS
+        )
+        assert verdict != "FAIL"

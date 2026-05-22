@@ -9,7 +9,6 @@ If the service restarts, graphs resume from their last checkpoint automatically.
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 
-from src.core.config import settings
 from src.core.schemas import StoryState, initial_story_state
 from src.fleet_commander.phases.development import run_development_phase
 from src.fleet_commander.phases.refinement import build_refinement_subgraph

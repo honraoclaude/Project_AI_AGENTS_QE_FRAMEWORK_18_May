@@ -198,3 +198,69 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.agent_id == 6
+
+
+# ── REQ-04: Postman + ManualTest enum tests ───────────────────────────────────
+
+MOCK_STRATEGY_POSTMAN = {
+    **MOCK_STRATEGY_HIGH,
+    "test_tools": ["ApexUnit", "CRT", "Postman"],
+}
+
+MOCK_STRATEGY_MANUAL = {
+    **MOCK_STRATEGY_HIGH,
+    "test_tools": ["ApexUnit", "ManualTest"],
+}
+
+
+@pytest.mark.asyncio
+class TestPostmanManualTestREQ04:
+    async def test_postman_in_test_tools_passes_through(self):
+        """REQ-04: Postman must be a valid test_tools enum value."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "HIGH", "fca_triggers": []}}
+
+        with (
+            patch("src.agents.refinement.agent_06_test_design.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_06_test_design.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_STRATEGY_POSTMAN
+            result = await run(state)
+
+        assert "Postman" in result.data["test_tools"]
+
+    async def test_manual_test_in_test_tools_passes_through(self):
+        """REQ-04: ManualTest must be a valid test_tools enum value."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_06_test_design.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_06_test_design.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_STRATEGY_MANUAL
+            result = await run(state)
+
+        assert "ManualTest" in result.data["test_tools"]
+
+    async def test_test_tools_list_in_output_data(self):
+        """REQ-04: test_tools list always present in output data."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_06_test_design.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_06_test_design.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_STRATEGY_HIGH
+            result = await run(state)
+
+        assert "test_tools" in result.data
+        assert isinstance(result.data["test_tools"], list)

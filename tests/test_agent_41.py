@@ -75,42 +75,42 @@ MOCK_TRACE_FAIL = {
 
 class TestCheckIntegrity:
     def test_clean_change_set_gives_pass(self):
-        valid, issues, destructive, verdict = _check_integrity(AGENT13_CLEAN, AGENT40_COMPOSED)
+        valid, issues, destructive, verdict = _check_integrity(None, AGENT13_CLEAN, AGENT40_COMPOSED)
         assert valid is True
         assert verdict == "PASS"
         assert len(issues) == 0
         assert destructive is False
 
     def test_destructive_changes_give_warn(self):
-        valid, issues, destructive, verdict = _check_integrity(AGENT13_DESTRUCTIVE, AGENT40_COMPOSED)
+        valid, issues, destructive, verdict = _check_integrity(None, AGENT13_DESTRUCTIVE, AGENT40_COMPOSED)
         assert valid is True  # destructive = WARN, not FAIL
         assert verdict == "WARN"
         assert destructive is True
 
     def test_missing_dependencies_give_fail(self):
-        valid, issues, destructive, verdict = _check_integrity(AGENT13_MISSING_DEPS, AGENT40_COMPOSED)
+        valid, issues, destructive, verdict = _check_integrity(None, AGENT13_MISSING_DEPS, AGENT40_COMPOSED)
         assert valid is False
         assert verdict == "FAIL"
         assert any("dependencies" in i.lower() for i in issues)
 
     def test_composer_failed_gives_fail(self):
-        valid, issues, _, verdict = _check_integrity(AGENT13_CLEAN, AGENT40_FAILED)
+        valid, issues, _, verdict = _check_integrity(None, AGENT13_CLEAN, AGENT40_FAILED)
         assert valid is False
         assert verdict == "FAIL"
 
     def test_large_change_set_gives_warn(self):
-        valid, issues, _, verdict = _check_integrity(AGENT13_LARGE, AGENT40_COMPOSED)
+        valid, issues, _, verdict = _check_integrity(None, AGENT13_LARGE, AGENT40_COMPOSED)
         assert verdict == "WARN"
         assert any("large" in i.lower() for i in issues)
 
     def test_no_upstream_data_gives_pass(self):
-        valid, issues, destructive, verdict = _check_integrity(None, None)
+        valid, issues, destructive, verdict = _check_integrity(None, None, None)
         assert valid is True
         assert verdict == "PASS"
         assert len(issues) == 0
 
     def test_destructive_does_not_make_invalid(self):
-        valid, _, _, _ = _check_integrity(AGENT13_DESTRUCTIVE, AGENT40_COMPOSED)
+        valid, _, _, _ = _check_integrity(None, AGENT13_DESTRUCTIVE, AGENT40_COMPOSED)
         assert valid is True
 
 
@@ -218,3 +218,61 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+
+# ── REQ-26: new tests ─────────────────────────────────────────────────────────
+
+AGENT40_FAILED = {
+    "release_name": "FSC-001-failed",
+    "component_count": 0,
+    "composer_verdict": "FAILED",
+    "release_type": "PATCH",
+    "components_summary": {},
+}
+
+AGENT40_COMPOSED_NO_EXT = {
+    "release_name": "FSC-001-minor",
+    "component_count": 3,
+    "composer_verdict": "COMPOSED",
+    "release_type": "MINOR",
+    "components_summary": {"ApexClass": 3},
+}
+
+AGENT8_EXT_DEPS = {"has_external_dependencies": True}
+
+
+class TestREQ26ComposerFailed:
+    def test_composer_failed_gives_integrity_fail(self):
+        valid, issues, _, verdict = _check_integrity(None, AGENT13_CLEAN, AGENT40_FAILED)
+        assert verdict == "FAIL"
+        assert valid is False
+
+    def test_composer_failed_issue_in_list(self):
+        _, issues, _, _ = _check_integrity(None, AGENT13_CLEAN, AGENT40_FAILED)
+        assert any("composer" in i.lower() for i in issues)
+
+
+class TestREQ26ExternalDepsWarn:
+    def test_ext_deps_missing_from_package_adds_warn_issue(self):
+        _, issues, _, verdict = _check_integrity(AGENT8_EXT_DEPS, AGENT13_CLEAN, AGENT40_COMPOSED_NO_EXT)
+        assert any("external service" in i.lower() for i in issues)
+
+    def test_ext_deps_present_in_package_no_warn(self):
+        agent40_with_ext = {**AGENT40_COMPOSED_NO_EXT, "components_summary": {"ApexClass": 3, "ExternalService": 1}}
+        _, issues, _, verdict = _check_integrity(AGENT8_EXT_DEPS, AGENT13_CLEAN, agent40_with_ext)
+        assert not any("external service" in i.lower() for i in issues)
+
+
+class TestREQ26TypedFlagsClassification:
+    def test_missing_deps_gives_fail_regardless_of_issue_text_order(self):
+        # typed flags must drive verdict, not substring matching
+        valid, issues, _, verdict = _check_integrity(None, AGENT13_MISSING_DEPS, AGENT40_COMPOSED_NO_EXT)
+        assert verdict == "FAIL"
+        assert valid is False
+
+    def test_warn_only_issue_does_not_give_fail(self):
+        # destructive changes = WARN, not FAIL
+        valid, _, _, verdict = _check_integrity(None, AGENT13_DESTRUCTIVE, AGENT40_COMPOSED_NO_EXT)
+        assert verdict == "WARN"
+        assert valid is True

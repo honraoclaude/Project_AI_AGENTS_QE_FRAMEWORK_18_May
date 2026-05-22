@@ -72,6 +72,7 @@ what is below threshold, and what the QE engineer must add to reach compliance.
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
     agent3_data  = _get_agent_data(state, "3")
+    agent4_data  = _get_agent_data(state, "4")
     agent5_data  = _get_agent_data(state, "5")
     agent19_data = _get_agent_data(state, "19")
     agent26_data = _get_agent_data(state, "26")
@@ -81,7 +82,7 @@ async def run(state: StoryState) -> AgentResult:
 
     # ── Deterministic aggregation ─────────────────────────────────────────────
     overall_pct, by_type, uncovered, verdict = _analyse_coverage(
-        agent3_data, agent5_data, agent19_data, agent26_data,
+        agent3_data, agent4_data, agent5_data, agent19_data, agent26_data,
         agent27_data, agent29_data, agent30_data,
     )
 
@@ -91,6 +92,8 @@ async def run(state: StoryState) -> AgentResult:
 
     confidence_score, signals = _compute_confidence(
         agent19_data, agent26_data, agent29_data, agent30_data, overall_pct,
+        scenarios_truncated=(agent26_data or {}).get("scenarios_truncated", False),
+        truncated_count=(agent26_data or {}).get("truncated_scenario_count", 0),
     )
     escalated = confidence_score < settings.confidence_escalation_threshold
 
@@ -132,6 +135,7 @@ async def run(state: StoryState) -> AgentResult:
 
 def _analyse_coverage(
     agent3_data: dict | None,
+    agent4_data: dict | None,
     agent5_data: dict | None,
     agent19_data: dict | None,
     agent26_data: dict | None,
@@ -141,9 +145,12 @@ def _analyse_coverage(
 ) -> tuple[float, dict, list[str], str]:
     """Returns (overall_pct, coverage_by_type, uncovered_acs, verdict)."""
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
+    vulnerable_customer_impact = (agent4_data or {}).get("vulnerable_customer_impact", False)
     expected_acs = (agent5_data or {}).get("ac_count", 0)
+    ac_clauses = (agent5_data or {}).get("ac_clauses", [])
 
     gherkin_count = (agent19_data or {}).get("scenario_count", 0)
+    vc_coverage_present = (agent19_data or {}).get("vulnerable_customer_coverage_present", False)
     crt_coverage = (agent26_data or {}).get("automation_coverage", 0.0)
     crt_executed = (agent27_data or {}).get("tests_executed", 0)
     uat_count = (agent29_data or {}).get("uat_test_count", 0)
@@ -155,12 +162,16 @@ def _analyse_coverage(
         "crt_executed": crt_executed,
         "uat": uat_count,
         "fca_regulatory": fca_count,
+        "vulnerable_customer_covered": vc_coverage_present,
     }
 
-    # Compute overall coverage as weighted average of available signals
+    # REQ-24 Gap 1: Gherkin normalised against expected AC count
     components: list[float] = []
     if gherkin_count > 0:
-        components.append(min(100.0, gherkin_count * 20.0))  # 5 scenarios = 100%
+        if expected_acs > 0:
+            components.append(min(100.0, gherkin_count / expected_acs * 100))
+        else:
+            components.append(min(100.0, gherkin_count * 20.0))  # fallback: no AC count
     if crt_coverage > 0:
         components.append(crt_coverage)
     if uat_count > 0 and expected_acs > 0:
@@ -171,21 +182,36 @@ def _analyse_coverage(
     overall_pct = sum(components) / len(components) if components else 0.0
     overall_pct = min(100.0, overall_pct)
 
-    # Uncovered ACs — stub: flag if UAT count < expected ACs
+    # REQ-24 Gap 2: Uncovered ACs — use real AC descriptions from Agent 05 when available
     uncovered: list[str] = []
     if expected_acs > 0 and uat_count < expected_acs:
-        for i in range(uat_count, expected_acs):
-            uncovered.append(f"AC{i+1}")
+        if ac_clauses:
+            uncovered = [
+                c.get("description", f"AC{i+1}")
+                for i, c in enumerate(ac_clauses[uat_count:])
+            ]
+        else:
+            for i in range(uat_count, expected_acs):
+                uncovered.append(f"AC{i+1}")
 
-    # FCA check
+    # FCA check thresholds
     min_threshold = {
         "HIGH": _MIN_COVERAGE_HIGH,
         "MEDIUM": _MIN_COVERAGE_MEDIUM,
     }.get(fca_class, _MIN_COVERAGE_LOW)
 
+    # REQ-24 Gap 3+4: verdict escalation logic
     if overall_pct < min_threshold:
         verdict = "FAIL"
-    elif uncovered or (fca_class in ("HIGH", "MEDIUM") and fca_count == 0):
+    elif fca_class == "HIGH" and fca_count == 0:
+        verdict = "FAIL"   # HIGH-FCA with no regulatory scenarios is a compliance gap
+    elif (
+        fca_class in ("HIGH", "MEDIUM")
+        and vulnerable_customer_impact
+        and not vc_coverage_present
+    ):
+        verdict = "FAIL"   # VC impact required but no VC scenario
+    elif uncovered or (fca_class == "MEDIUM" and fca_count == 0):
         verdict = "WARN"
     else:
         verdict = "PASS"
@@ -201,6 +227,8 @@ def _compute_confidence(
     agent29_data: dict | None,
     agent30_data: dict | None,
     overall_pct: float,
+    scenarios_truncated: bool = False,
+    truncated_count: int = 0,
 ) -> tuple[int, dict]:
     scorer = TierBScorer(base=65)
 
@@ -216,6 +244,10 @@ def _compute_confidence(
         scorer.add("high_coverage", overall_pct, +5)
     elif overall_pct < 50:
         scorer.add("low_coverage", overall_pct, -5)
+
+    # REQ-24 Gap 5: CRT scenario truncation means automation_coverage is an overestimate
+    if scenarios_truncated:
+        scorer.add("crt_scenario_truncated", truncated_count, -5)
 
     scorer.cap(92).floor(20)
     return scorer.build()

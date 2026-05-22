@@ -52,7 +52,12 @@ _TRACE_TOOL_SCHEMA = {
         "composer_concern": {
             "type": "string",
             "enum": ["none", "no_components", "regulated_components_present",
-                     "large_change_set", "metadata_missing"],
+                     "large_change_set", "metadata_missing", "sfdx_format_invalid"],
+        },
+        "composer_verdict": {
+            "type": "string",
+            "enum": ["COMPOSED", "PARTIAL", "FAILED"],
+            "description": "COMPOSED: package ready; PARTIAL: zero components; FAILED: format/validation error.",
         },
     },
 }
@@ -69,16 +74,20 @@ any concerns the QE team should be aware of before proceeding.
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent8_data  = _get_agent_data(state, "8")
     agent13_data = _get_agent_data(state, "13")
     agent17_data = _get_agent_data(state, "17")
     agent18_data = _get_agent_data(state, "18")
 
     release_name, component_count, release_type, components_summary, verdict = _compose_release(
-        story_id, agent13_data, agent17_data, agent18_data,
+        story_id, agent8_data, agent13_data, agent17_data, agent18_data,
     )
 
+    has_ext = (agent8_data or {}).get("has_external_dependencies", False)
+    fmt_violations = (agent17_data or {}).get("format_violations", [])
     trace_msg = _build_trace_message(
-        story_id, release_name, component_count, release_type, components_summary, verdict,
+        story_id, release_name, component_count, release_type, components_summary,
+        verdict, has_ext, fmt_violations,
     )
     trace = await _generate_trace(trace_msg)
 
@@ -124,6 +133,7 @@ async def run(state: StoryState) -> AgentResult:
 
 def _compose_release(
     story_id: str,
+    agent8_data: dict | None,
     agent13_data: dict | None,
     agent17_data: dict | None,
     agent18_data: dict | None,
@@ -132,14 +142,22 @@ def _compose_release(
     changed_files_count = (agent13_data or {}).get("changed_files_count", 0)
     detected_objects    = (agent13_data or {}).get("detected_objects", [])
     component_types     = (agent18_data or {}).get("component_types", {})
+    sfdx_format_valid   = (agent17_data or {}).get("sfdx_format_valid", True)
+    format_violations   = (agent17_data or {}).get("format_violations", [])
+    has_external_deps   = (agent8_data or {}).get("has_external_dependencies", False)
 
-    # Stub: derive component count from metadata signals
-    component_count = max(changed_files_count, len(component_types))
+    # REQ-25 Gap 2: sum component type counts, not count distinct types
+    component_count = sum(component_types.values()) if component_types else changed_files_count
     if component_count == 0:
         component_count = len(detected_objects)
 
     # Build components summary from attribution data
     components_summary: dict = dict(component_types) if component_types else {}
+
+    # REQ-25 Gap 4: external dependencies add to package
+    if has_external_deps and "ExternalService" not in components_summary:
+        components_summary["ExternalService"] = 1
+        component_count += 1
 
     # Infer release type from component profile
     has_regulated   = any(ct in _REGULATED_COMPONENT_TYPES for ct in components_summary)
@@ -155,7 +173,10 @@ def _compose_release(
 
     release_name = f"{story_id}-{release_type.lower()}-release"
 
-    if component_count == 0:
+    # REQ-25 Gap 1: SFDX format invalid → FAILED
+    if not sfdx_format_valid:
+        verdict = "FAILED"
+    elif component_count == 0:
         verdict = "PARTIAL"
     else:
         verdict = "COMPOSED"
@@ -210,13 +231,18 @@ def _build_trace_message(
     release_type: str,
     components_summary: dict,
     verdict: str,
+    has_external_deps: bool = False,
+    format_violations: list | None = None,
 ) -> str:
+    ext_line = "External dependencies: YES — verify Named Credentials/Connected Apps\n" if has_external_deps else ""
+    fmt_line = f"SFDX format violations: {format_violations}\n" if format_violations else ""
     return (
         f"Story: {story_id}\n"
         f"Release name: {release_name}\n"
         f"Component count: {component_count}\n"
         f"Release type: {release_type}\n"
         f"Components: {components_summary or '(none identified)'}\n"
+        f"{ext_line}{fmt_line}"
         f"Verdict: {verdict}\n\n"
         f"Generate a 2–3 sentence narrative using the {_TRACE_TOOL_NAME} tool."
     )

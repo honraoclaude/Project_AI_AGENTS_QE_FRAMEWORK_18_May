@@ -447,3 +447,204 @@ class TestTAPenalties:
     def test_disagreement_signal_records_ta_key(self):
         _, signals = _conf(AGENT3_DISAGREED, 55, None, None, None, None, MOCK_RISK_LOW)
         assert any("agent3_disagreed" in k for k in signals)
+
+
+# ── REQ-07: new risk signal tests ────────────────────────────────────────────
+
+AGENT5_WITH_VC_COVERAGE = {
+    "generation_mode": "validated_existing",
+    "ac_clause_count": 6,
+    "remaining_gaps": [],
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": True,
+        "vulnerable_customer": True,
+    },
+}
+
+AGENT5_MISSING_VC_COVERAGE = {
+    "generation_mode": "validated_existing",
+    "ac_clause_count": 5,
+    "remaining_gaps": [],
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": True,
+        "vulnerable_customer": False,
+    },
+}
+
+AGENT6_WITH_POSTMAN = {
+    "coverage_target_pct": 85,
+    "test_tools": ["ApexUnit", "CRT", "Postman"],
+    "risk_areas": [],
+}
+
+AGENT6_WITHOUT_POSTMAN = {
+    "coverage_target_pct": 85,
+    "test_tools": ["ApexUnit", "CRT"],
+    "risk_areas": [],
+}
+
+AGENT7_NO_FCA_CONTEXT = {
+    "data_volume": "complex",
+    "sensitive_data_present": False,
+    "fca_context_available": False,
+    "risks": [],
+}
+
+AGENT7_WITH_FCA_CONTEXT = {
+    "data_volume": "complex",
+    "sensitive_data_present": False,
+    "fca_context_available": True,
+    "risks": [],
+}
+
+AGENT8_WITH_EXTERNAL_DEPS = {
+    "detected_objects": ["suitability__c"],
+    "implied_objects": [],
+    "dependency_depth": 1,
+    "has_external_dependencies": True,
+    "detected_dependency_types": ["external_service"],
+}
+
+AGENT8_WITH_PLATFORM_EVENT = {
+    "detected_objects": ["suitability__c"],
+    "implied_objects": [],
+    "dependency_depth": 1,
+    "has_external_dependencies": True,
+    "detected_dependency_types": ["platform_event"],
+}
+
+AGENT8_NO_EXTERNAL_DEPS = {
+    "detected_objects": ["suitability__c"],
+    "implied_objects": [],
+    "dependency_depth": 1,
+    "has_external_dependencies": False,
+    "detected_dependency_types": [],
+}
+
+
+@pytest.mark.asyncio
+class TestNewRiskSignalsREQ07:
+    async def test_vc_impact_true_no_vc_scenario_in_prompt(self):
+        """REQ-07: vulnerable_customer_impact=True + coverage.vulnerable_customer=False → risk signal in prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["4"] = {"data": AGENT4_AT_RISK}  # vc_impact=True
+        state["agent_results"]["5"] = {"data": AGENT5_MISSING_VC_COVERAGE}
+
+        captured_user_message = None
+
+        async def capture_call(**kwargs):
+            nonlocal captured_user_message
+            captured_user_message = kwargs.get("user_message", "")
+            return MOCK_RISK_CRITICAL
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  side_effect=capture_call),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            await run(state)
+
+        assert "vulnerable_customer=False" in captured_user_message
+
+    async def test_fca_context_unavailable_in_prompt(self):
+        """REQ-07: fca_context_available=False from Agent 07 surfaces in the prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["7"] = {"data": AGENT7_NO_FCA_CONTEXT}
+
+        captured_user_message = None
+
+        async def capture_call(**kwargs):
+            nonlocal captured_user_message
+            captured_user_message = kwargs.get("user_message", "")
+            return MOCK_RISK_LOW
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  side_effect=capture_call),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            await run(state)
+
+        assert "FCA Context Available: False" in captured_user_message
+
+    async def test_external_deps_without_postman_in_prompt(self):
+        """REQ-07: has_external_dependencies=True without Postman in Agent 6 test_tools → both surfaced."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["6"] = {"data": AGENT6_WITHOUT_POSTMAN}
+        state["agent_results"]["8"] = {"data": AGENT8_WITH_EXTERNAL_DEPS}
+
+        captured_user_message = None
+
+        async def capture_call(**kwargs):
+            nonlocal captured_user_message
+            captured_user_message = kwargs.get("user_message", "")
+            return MOCK_RISK_LOW
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  side_effect=capture_call),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            await run(state)
+
+        assert "Has External Dependencies: True" in captured_user_message
+        assert "Postman" not in captured_user_message.split("Test Tools:")[1].split("\n")[0]
+
+    async def test_platform_event_dependency_type_in_prompt(self):
+        """REQ-07: platform_event in detected_dependency_types surfaces in prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["8"] = {"data": AGENT8_WITH_PLATFORM_EVENT}
+
+        captured_user_message = None
+
+        async def capture_call(**kwargs):
+            nonlocal captured_user_message
+            captured_user_message = kwargs.get("user_message", "")
+            return MOCK_RISK_LOW
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  side_effect=capture_call),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            await run(state)
+
+        assert "platform_event" in captured_user_message
+
+    async def test_test_tools_list_in_prompt(self):
+        """REQ-07: Agent 6 test_tools appear in prompt so Sonnet can detect missing Postman."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["6"] = {"data": AGENT6_WITH_POSTMAN}
+
+        captured_user_message = None
+
+        async def capture_call(**kwargs):
+            nonlocal captured_user_message
+            captured_user_message = kwargs.get("user_message", "")
+            return MOCK_RISK_LOW
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  side_effect=capture_call),
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            await run(state)
+
+        assert "Test Tools:" in captured_user_message
+        assert "Postman" in captured_user_message

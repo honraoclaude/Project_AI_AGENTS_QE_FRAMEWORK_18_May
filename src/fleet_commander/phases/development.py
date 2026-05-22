@@ -168,8 +168,6 @@ async def run_development_phase(state: StoryState) -> StoryState:
     """
     from src.fleet_commander.worker import dispatch_agent  # lazy import to avoid MCP circular dep
 
-    story_id = state["story_id"]
-
     # ── Batch 1: AC Compliance + Branch Tracer + Metadata Dependency ──────────
     batch1_results = await asyncio.gather(
         dispatch_agent(10, state),

@@ -98,6 +98,49 @@ class TestSecurityAnalysis:
         _, flags, _, _, _ = _analyse_security_risk(AGENT3_HIGH, agent13_deep)
         assert any("depth" in f.lower() or "chain" in f.lower() for f in flags)
 
+    def test_medium_fca_no_fsc_objects_gives_pass(self):
+        """REQ-09: MEDIUM-FCA + no regulated objects → PASS, not REVIEW_REQUIRED."""
+        risk, _, crud, sharing, verdict = _analyse_security_risk(AGENT3_MEDIUM, AGENT13_EMPTY)
+        assert risk == "LOW"
+        assert verdict == "PASS"
+        assert crud is False
+        assert sharing is False
+
+    def test_high_fca_no_fsc_objects_gives_pass(self):
+        """REQ-09: HIGH-FCA + no regulated objects → LOW risk / PASS."""
+        risk, _, crud, sharing, verdict = _analyse_security_risk(AGENT3_HIGH, AGENT13_EMPTY)
+        assert risk == "LOW"
+        assert verdict == "PASS"
+        assert sharing is False
+
+    def test_financialaccount_detected_gives_review_required(self):
+        """REQ-09: financialaccount is now in _HIGH_RISK_OBJECTS — triggers REVIEW_REQUIRED."""
+        agent13_aum = {
+            "detected_objects": ["financialaccount"],
+            "dependency_depth": 1,
+        }
+        _, _, crud, _, verdict = _analyse_security_risk(AGENT3_HIGH, agent13_aum)
+        assert verdict == "REVIEW_REQUIRED"
+        assert crud is True
+
+    def test_financialholding_detected_gives_crud_required(self):
+        """REQ-09: financialholding is now in _HIGH_RISK_OBJECTS — CRUD/FLS required."""
+        agent13_aum = {
+            "detected_objects": ["financialholding"],
+            "dependency_depth": 1,
+        }
+        _, _, crud, _, _ = _analyse_security_risk(AGENT3_LOW, agent13_aum)
+        assert crud is True
+
+    def test_sharing_required_only_when_fca_elevated_and_objects_present(self):
+        """REQ-09: sharing_required = HIGH/MEDIUM FCA AND high-risk objects — not just FCA tier."""
+        # HIGH FCA but no high-risk objects → sharing NOT required
+        _, _, _, sharing_no_objects, _ = _analyse_security_risk(AGENT3_HIGH, AGENT13_EMPTY)
+        assert sharing_no_objects is False
+        # HIGH FCA + high-risk objects → sharing required
+        _, _, _, sharing_with_objects, _ = _analyse_security_risk(AGENT3_HIGH, AGENT13_SUITABILITY)
+        assert sharing_with_objects is True
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 

@@ -113,6 +113,7 @@ async def run(state: StoryState) -> AgentResult:
         "integrity_violations": violations,
         "integrity_verdict": verdict,
         "rules_checked": rules_checked,
+        "stub_mode": True,  # REQ-22: live org queries not yet implemented; Gate G5 guards on this
         "integrity_concern": trace.get("integrity_concern", "none"),
         "narrative": trace.get("narrative", ""),
         "signals": signals,

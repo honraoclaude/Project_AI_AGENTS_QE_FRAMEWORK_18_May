@@ -89,13 +89,22 @@ Avoid vague language. Include specific metrics (coverage %, file counts, violati
 
 async def run(state: StoryState) -> AgentResult:
     story_id = state["story_id"]
+    agent3_data = _get_agent_data(state, "3")
+    fca_class = (agent3_data or {}).get("fca_classification", "LOW")
 
     # ── Aggregate all Development agent signals ───────────────────────────────
     agent_signals = _collect_agent_signals(state)
-    critical_failures, advisory_warnings = _classify_signals(agent_signals)
+    critical_failures, advisory_warnings = _classify_signals(agent_signals, fca_class)
     dev_verdict = _determine_verdict(critical_failures, advisory_warnings, agent_signals)
     gate_g4 = _build_gate_g4_signals(agent_signals, critical_failures, advisory_warnings)
     escalation_required = len(critical_failures) > 0
+
+    isolation_override = (
+        agent_signals.get("21", {}).get("data", {}).get("isolation_override", False)
+    )
+    isolation_override_reason = (
+        agent_signals.get("21", {}).get("data", {}).get("isolation_override_reason", "")
+    )
 
     # ── Haiku trace ───────────────────────────────────────────────────────────
     trace_message = _build_trace_message(
@@ -114,6 +123,7 @@ async def run(state: StoryState) -> AgentResult:
         "agent_verdicts": agent_signals,
         "critical_failures": critical_failures,
         "advisory_warnings": advisory_warnings,
+        "isolation_override": isolation_override,
         "audit_summary": trace.get("audit_summary", ""),
         "narrative": trace.get("narrative", ""),
     }
@@ -135,6 +145,8 @@ async def run(state: StoryState) -> AgentResult:
         "escalation_required": escalation_required,
         "critical_failures": critical_failures,
         "advisory_warnings": advisory_warnings,
+        "isolation_override": isolation_override,
+        "isolation_override_reason": isolation_override_reason,
         "agents_assessed": len(agent_signals),
         "signals": signals,
     }
@@ -197,6 +209,7 @@ def _extract_verdict(agent_id: str, data: dict) -> str:
 
 def _classify_signals(
     agent_signals: dict[str, dict],
+    fca_class: str = "LOW",
 ) -> tuple[list[str], list[str]]:
     critical_failures: list[str] = []
     advisory_warnings: list[str] = []
@@ -208,6 +221,28 @@ def _classify_signals(
             critical_failures.append(f"{name}: {verdict}")
         elif verdict in ("WARN", "PARTIAL", "REVIEW_REQUIRED", "INCOMPLETE"):
             advisory_warnings.append(f"{name}: {verdict}")
+
+    # REQ-15: FCA-conditional criticality for INCOMPLETE verdicts (Option B)
+    if fca_class in ("HIGH", "MEDIUM"):
+        gherkin_verdict = agent_signals.get("19", {}).get("verdict", "")
+        if gherkin_verdict == "INCOMPLETE":
+            critical_failures.append(
+                "BDD Gherkin: INCOMPLETE — regulated story cannot proceed to Testing without scenarios"
+            )
+        data_verdict = agent_signals.get("21", {}).get("verdict", "")
+        if data_verdict == "INCOMPLETE":
+            critical_failures.append(
+                "Test Data Architect: INCOMPLETE — regulated story cannot proceed to Testing without data strategy"
+            )
+
+    # REQ-15: surface isolation_override as advisory warning
+    isolation_override = agent_signals.get("21", {}).get("data", {}).get("isolation_override", False)
+    isolation_override_reason = agent_signals.get("21", {}).get("data", {}).get("isolation_override_reason", "")
+    if isolation_override:
+        advisory_warnings.append(
+            f"Test Data Architect: data isolation strategy corrected for FCA tier — "
+            f"audit trail updated. {isolation_override_reason}"
+        )
 
     return critical_failures, advisory_warnings
 
@@ -233,12 +268,14 @@ def _build_gate_g4_signals(
     critical_failures: list[str],
     advisory_warnings: list[str],
 ) -> dict:
+    isolation_override = agent_signals.get("21", {}).get("data", {}).get("isolation_override", False)
     return {
         "coverage_passed": agent_signals.get("12", {}).get("data", {}).get("coverage_passed", False),
         "security_verdict": agent_signals.get("15", {}).get("verdict", "UNKNOWN"),
         "quality_verdict": agent_signals.get("14", {}).get("verdict", "UNKNOWN"),
         "sfdx_valid": agent_signals.get("17", {}).get("data", {}).get("sfdx_format_valid", True),
         "sandbox_ready": agent_signals.get("22", {}).get("data", {}).get("sandbox_ready", False),
+        "isolation_override": isolation_override,
         "critical_failure_count": len(critical_failures),
         "advisory_warning_count": len(advisory_warnings),
     }

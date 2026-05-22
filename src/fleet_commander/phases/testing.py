@@ -47,9 +47,18 @@ class GateG6Error(Exception):
 def _check_gate_g5(state: StoryState) -> None:
     """
     Gate G5 — Test Quality.
-    Blocks if: coverage below FCA threshold, or critical defects found.
+    Blocks if: coverage below FCA threshold, critical defects found, or CRT execution skipped.
     """
     failures: list[str] = []
+
+    # REQ-18: CRT execution SKIPPED → no automated tests ran
+    crt_data = _get_agent_data(state, "27")
+    crt_verdict = (crt_data or {}).get("crt_execution_verdict", "")
+    if crt_verdict == "SKIPPED":
+        failures.append(
+            "CRT Execution (Agent 27): SKIPPED — no automated tests ran; "
+            "manual evidence required before Testing phase can pass"
+        )
 
     cov_data = _get_agent_data(state, "33")
     cov_verdict = (cov_data or {}).get("coverage_verdict", "")
@@ -65,6 +74,16 @@ def _check_gate_g5(state: StoryState) -> None:
         critical = (def_data or {}).get("critical_defects", [])
         failures.append(
             f"Defect Triage (Agent 34): FAIL — {len(critical)} critical defect(s): {critical}"
+        )
+
+    # REQ-22: Financial Data Integrity FAIL (only when not stub-mode)
+    integrity_data = _get_agent_data(state, "31")
+    integrity_verdict = (integrity_data or {}).get("integrity_verdict", "")
+    stub_mode = (integrity_data or {}).get("stub_mode", True)
+    if integrity_verdict == "FAIL" and not stub_mode:
+        violations = (integrity_data or {}).get("integrity_violations", [])
+        failures.append(
+            f"Financial Data Integrity (Agent 31): FAIL — {len(violations)} violation(s)"
         )
 
     if failures:

@@ -143,6 +143,15 @@ _TOOL_SCHEMA = {
                 "For AT_RISK or NON_COMPLIANT, name the specific obligation and gap."
             ),
         },
+        "ui_or_support_touch": {
+            "type": "boolean",
+            "description": (
+                "True if the story touches any client-facing UI, notification template, "
+                "Screen Flow, LWC component, or Case/Task/ServiceAppointment objects — "
+                "regardless of FCA tier. Triggers consumer_understanding and "
+                "consumer_support outcome checks even for LOW-FCA stories."
+            ),
+        },
     },
 }
 
@@ -179,12 +188,22 @@ Vulnerable Customer (FG21/1):
   automated or digital processes. Any mandatory screen-flow step should have a bypass
   or enhanced-support alternative.
 
+UI and Support touch — mandatory check regardless of FCA tier:
+Before assigning NOT_APPLICABLE, check whether the story touches any of:
+  - Screen Flows, LWC components, notification templates, or Email Templates
+  - Case, Task, or ServiceAppointment objects
+If ANY of these are present, set ui_or_support_touch=True and evaluate
+consumer_understanding (Outcome 3) and consumer_support (Outcome 4) even for
+LOW-FCA stories — these obligations apply to client-facing changes regardless of tier.
+
 Verdict guidance:
 - COMPLIANT: all CD outcomes are addressed, ACs cover the CD obligations, no gaps identified.
 - AT_RISK: story touches a CD outcome but ACs are incomplete or a CD risk exists.
   Missing error/edge-case scenarios for vulnerable customer paths → AT_RISK.
 - NON_COMPLIANT: story explicitly removes or disables a Consumer Duty control.
-- NOT_APPLICABLE: LOW-FCA story with no customer-facing or CD-relevant impact.
+- NOT_APPLICABLE: story has no customer-facing or CD-relevant impact AND
+  ui_or_support_touch=False. Do NOT assign NOT_APPLICABLE for LOW-FCA stories
+  that touch UI components, notification templates, or support flows.
 
 For HIGH-FCA stories: always check all four outcomes — a suitability story may
 affect Products and Services AND Consumer Understanding if the assessment results
@@ -229,12 +248,12 @@ async def run(state: StoryState) -> AgentResult:
 
     fca_class = (agent3_data or {}).get("fca_classification", state.get("fca_classification", "UNCLASSIFIED"))
     outcomes = extracted.get("cd_outcomes_affected", [])
-    verdict = extracted["cd_verdict"]
+    verdict = extracted.get("cd_verdict", "AT_RISK")
 
     what = (
         f"Consumer Duty mapping for {story_id}: verdict={verdict}, "
         f"outcomes={outcomes}, "
-        f"vulnerable_customer={extracted['vulnerable_customer_impact']}"
+        f"vulnerable_customer={extracted.get('vulnerable_customer_impact', False)}"
     )
     why = (
         f"Consumer Duty Mapper applied FCA PS22/9 and FG21/1 to story classified as "
@@ -245,13 +264,14 @@ async def run(state: StoryState) -> AgentResult:
 
     data = {
         "cd_outcomes_affected": outcomes,
-        "vulnerable_customer_impact": extracted["vulnerable_customer_impact"],
-        "vulnerable_customer_rationale": extracted["vulnerable_customer_rationale"],
+        "vulnerable_customer_impact": extracted.get("vulnerable_customer_impact", False),
+        "vulnerable_customer_rationale": extracted.get("vulnerable_customer_rationale", ""),
+        "ui_or_support_touch": extracted.get("ui_or_support_touch", False),
         "cd_obligations": extracted.get("cd_obligations", []),
         "cd_risks": extracted.get("cd_risks", []),
         "cd_evidence_required": extracted.get("cd_evidence_required", []),
         "cd_verdict": verdict,
-        "cd_rationale": extracted["cd_rationale"],
+        "cd_rationale": extracted.get("cd_rationale", ""),
         "fca_classification_from_agent3": fca_class,
         "agent3_available": agent3_data is not None,
         "signals": signals,
@@ -299,10 +319,8 @@ def _compute_confidence(agent3_data: dict | None, extracted: dict) -> tuple[int,
         else:
             scorer.add("agent3_disagreed", True, -5)
 
-        # Signal 3: Agent 3 confidence feeds into our mapping confidence
-        agent3_confidence = agent3_data.get("signals", {})
-        # Use the final_score from the parent AgentResult if available
-        # (agent3_data is the "data" dict, not the full result — use triggers as proxy)
+        # Signal 3: Agent 3 confidence — use triggers as proxy
+        # (agent3_data is the data dict; triggers are the observable signal)
         triggers = agent3_data.get("fca_triggers", [])
         if len(triggers) >= 2:
             scorer.add("fca_triggers_present", len(triggers), +5)
@@ -317,9 +335,13 @@ def _compute_confidence(agent3_data: dict | None, extracted: dict) -> tuple[int,
     else:
         scorer.add("agent3_unavailable", True, -8)
 
-    # Signal 5: NOT_APPLICABLE verdict is a confident, low-cost answer
+    # Signal 5: NOT_APPLICABLE verdict is a confident answer only when no UI/support touch
     if extracted.get("cd_verdict") == "NOT_APPLICABLE":
-        scorer.add("not_applicable_verdict", True, +5)
+        if extracted.get("ui_or_support_touch", False):
+            # LOW-FCA + UI touch should not produce NOT_APPLICABLE — lower confidence
+            scorer.add("not_applicable_but_ui_touch", True, -8)
+        else:
+            scorer.add("not_applicable_verdict", True, +5)
 
     # Signal 6: Many obligations listed → richer evidence → more confident
     obligations = len(extracted.get("cd_obligations", []))

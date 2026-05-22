@@ -64,43 +64,43 @@ MOCK_TRACE_PARTIAL = {
 
 class TestComposeRelease:
     def test_apex_components_give_minor_release(self):
-        _, _, release_type, _, _ = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_APEX)
+        _, _, release_type, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert release_type == "MINOR"
 
     def test_custom_object_gives_major_release(self):
-        _, _, release_type, _, _ = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_WITH_OBJECTS)
+        _, _, release_type, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_WITH_OBJECTS)
         assert release_type == "MAJOR"
 
     def test_non_apex_non_object_gives_patch(self):
-        _, _, release_type, _, _ = _compose_release("FSC-001", AGENT13_EMPTY, None, AGENT18_PATCH)
+        _, _, release_type, _, _ = _compose_release("FSC-001", None, AGENT13_EMPTY, None, AGENT18_PATCH)
         assert release_type == "PATCH"
 
     def test_release_name_contains_story_id(self):
-        release_name, _, _, _, _ = _compose_release("FSC-2417", AGENT13_RICH, None, AGENT18_APEX)
+        release_name, _, _, _, _ = _compose_release("FSC-2417", None, AGENT13_RICH, None, AGENT18_APEX)
         assert "FSC-2417" in release_name
 
     def test_release_name_contains_type(self):
-        release_name, _, release_type, _, _ = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_APEX)
+        release_name, _, release_type, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert release_type.lower() in release_name
 
     def test_component_count_from_metadata(self):
-        _, count, _, _, _ = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_APEX)
+        _, count, _, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert count > 0
 
     def test_no_components_gives_partial(self):
-        _, count, _, _, verdict = _compose_release("FSC-001", AGENT13_EMPTY, None, None)
+        _, count, _, _, verdict = _compose_release("FSC-001", None, AGENT13_EMPTY, None, None)
         assert verdict == "PARTIAL"
 
     def test_components_give_composed_verdict(self):
-        _, _, _, _, verdict = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_APEX)
+        _, _, _, _, verdict = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert verdict == "COMPOSED"
 
     def test_components_summary_populated_from_attribution(self):
-        _, _, _, summary, _ = _compose_release("FSC-001", AGENT13_RICH, None, AGENT18_APEX)
+        _, _, _, summary, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert "ApexClass" in summary
 
     def test_no_upstream_data_gives_partial(self):
-        _, _, _, _, verdict = _compose_release("FSC-001", None, None, None)
+        _, _, _, _, verdict = _compose_release("FSC-001", None, None, None, None)
         assert verdict == "PARTIAL"
 
 
@@ -177,3 +177,48 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-25: new tests ─────────────────────────────────────────────────────────
+
+AGENT17_SFDX_INVALID = {
+    "sfdx_format_valid": False,
+    "format_violations": ["classes/MyClass.cls: missing -meta.xml"],
+}
+
+AGENT8_EXT_DEPS = {
+    "has_external_dependencies": True,
+}
+
+
+class TestREQ25SfdxInvalidFailed:
+    def test_sfdx_format_invalid_gives_failed_verdict(self):
+        _, _, _, _, verdict = _compose_release("FSC-001", None, AGENT13_RICH, AGENT17_SFDX_INVALID, AGENT18_APEX)
+        assert verdict == "FAILED"
+
+    def test_sfdx_format_valid_true_gives_composed(self):
+        agent17_valid = {"sfdx_format_valid": True, "format_violations": []}
+        _, _, _, _, verdict = _compose_release("FSC-001", None, AGENT13_RICH, agent17_valid, AGENT18_APEX)
+        assert verdict == "COMPOSED"
+
+
+class TestREQ25ComponentCountSum:
+    def test_component_count_sums_type_values(self):
+        agent18 = {"component_types": {"ApexClass": 3, "CustomObject": 1}}
+        _, count, _, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, agent18)
+        assert count == 4
+
+    def test_mixed_types_summed_correctly(self):
+        agent18 = {"component_types": {"ApexClass": 2, "CustomObject": 1, "CustomField": 4}}
+        _, count, _, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, agent18)
+        assert count == 7
+
+
+class TestREQ25ExternalDepsInSummary:
+    def test_external_deps_adds_external_service_to_summary(self):
+        _, _, _, summary, _ = _compose_release("FSC-001", AGENT8_EXT_DEPS, AGENT13_RICH, None, AGENT18_APEX)
+        assert "ExternalService" in summary
+
+    def test_no_external_deps_no_external_service_key(self):
+        _, _, _, summary, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
+        assert "ExternalService" not in summary

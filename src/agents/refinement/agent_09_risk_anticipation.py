@@ -39,7 +39,7 @@ Output data keys consumed by downstream:
 
 from __future__ import annotations
 
-from src.agents.base import ShapleyAttributor, TierBScorer, build_system, call_with_tool, classify_ta_interaction, get_agent_result, _ta_mult
+from src.agents.base import ShapleyAttributor, TierBScorer, _ta_mult, build_system, call_with_tool, get_agent_result
 from src.core.config import settings
 from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 from src.integrations.jira import get_story
@@ -173,9 +173,13 @@ Synthesis rules:
 4. Agent 4 vulnerable_customer_impact=True with no regulatory AC scenario (Agent 5) → CRITICAL consumer_duty risk.
 5. Agent 5 remaining_gaps → quality risks (one per gap).
 6. Agent 5 generated_from_scratch → quality risk (ACs are AI-generated, not PO-authored).
-7. Agent 6 risk_areas → technical risks (one per area).
-8. Agent 7 risks → data risks (one per risk).
-9. Agent 8 dependency_depth ≥ 3 → technical risk (deep dependency chain).
+7. Agent 5 coverage_assessment.vulnerable_customer=False when vulnerable_customer_impact=True → CRITICAL consumer_duty risk ("Vulnerable customer pathway has no dedicated test scenario — FG21/1 compliance at risk").
+8. Agent 6 risk_areas → technical risks (one per area).
+9. Agent 7 risks → data risks (one per risk).
+10. Agent 7 fca_context_available=False → MEDIUM data risk ("Data isolation strategy set without FCA tier context — verify in Development phase Agent 21").
+11. Agent 8 dependency_depth ≥ 3 → technical risk (deep dependency chain).
+12. Agent 8 has_external_dependencies=True but Postman not in Agent 6 test_tools → HIGH technical risk ("External service dependencies identified but no API testing tool recommended — add Postman to test_tools in Agent 6").
+13. Agent 8 detected_dependency_types contains platform_event or external_service → MEDIUM technical risk ("Async/external dependency detected — deployment order and rollback complexity are elevated").
 
 Do not duplicate: if two agents flag the same issue, merge into one risk with both source agents noted.
 
@@ -237,13 +241,13 @@ async def run(state: StoryState) -> AgentResult:
     fca_class = (agent3_data or {}).get("fca_classification", state.get("fca_classification", "UNCLASSIFIED"))
 
     risk_register = extracted.get("risk_register", [])
-    critical = extracted["critical_risk_count"]
-    high = extracted["high_risk_count"]
+    critical = extracted.get("critical_risk_count", sum(1 for r in risk_register if r.get("severity") == "CRITICAL"))
+    high = extracted.get("high_risk_count", sum(1 for r in risk_register if r.get("severity") == "HIGH"))
 
     what = (
         f"Risk register for {story_id}: {len(risk_register)} risk(s) identified — "
         f"CRITICAL={critical}, HIGH={high}, "
-        f"overall={extracted['overall_risk_level']}"
+        f"overall={extracted.get('overall_risk_level', 'UNKNOWN')}"
     )
     why = (
         f"Risk Anticipation Agent synthesised findings from {_count_available_agents(state)} "
@@ -256,8 +260,8 @@ async def run(state: StoryState) -> AgentResult:
         "risk_count": len(risk_register),
         "critical_risk_count": critical,
         "high_risk_count": high,
-        "overall_risk_level": extracted["overall_risk_level"],
-        "risk_summary": extracted["risk_summary"],
+        "overall_risk_level": extracted.get("overall_risk_level", "UNKNOWN"),
+        "risk_summary": extracted.get("risk_summary", ""),
         "recommended_actions": extracted.get("recommended_actions", []),
         "fca_classification_context": fca_class,
         "upstream_agents_available": _count_available_agents(state),
@@ -318,7 +322,7 @@ def _compute_confidence(
     if agent4_data:
         scorer.add("agent4_available", True, +5)
         if agent4_data.get("cd_verdict") in ("AT_RISK", "NON_COMPLIANT"):
-            scorer.add("cd_risk_confirmed", agent4_data["cd_verdict"], +3)
+            scorer.add("cd_risk_confirmed", agent4_data.get("cd_verdict", ""), +3)
 
     # Signal 3: Agent 8 dependency depth → technical risk grounding
     depth = (agent8_data or {}).get("dependency_depth", 0)
@@ -345,7 +349,7 @@ def _compute_confidence(
 
     # Signal 7: CRITICAL risks present → high severity clearly detected (confident)
     if extracted.get("critical_risk_count", 0) > 0:
-        scorer.add("critical_risks_identified", extracted["critical_risk_count"], +5)
+        scorer.add("critical_risks_identified", extracted.get("critical_risk_count", 0), +5)
 
     # Signal 8 (adversarial): Agent 05B challenge — adjust for AC weakness findings
     if agent5b_data is not None:
@@ -454,7 +458,8 @@ def _build_user_message(
             f"  Mode: {agent5_data.get('generation_mode', 'N/A')}\n"
             f"  Clause Count: {agent5_data.get('ac_clause_count', 0)}\n"
             f"  Coverage: happy={coverage.get('happy_path')}, error={coverage.get('error_paths')}, "
-            f"edge={coverage.get('edge_cases')}, regulatory={coverage.get('regulatory')}\n"
+            f"edge={coverage.get('edge_cases')}, regulatory={coverage.get('regulatory')}, "
+            f"vulnerable_customer={coverage.get('vulnerable_customer')}\n"
             f"  Remaining Gaps: {'; '.join(agent5_data.get('remaining_gaps', [])) or 'None'}"
         )
 
@@ -473,6 +478,7 @@ def _build_user_message(
         lines.append(
             f"AGENT 6 — TEST DESIGN [confidence: {agent6_conf}]:\n"
             f"  Coverage Target: {agent6_data.get('coverage_target_pct', 'N/A')}%\n"
+            f"  Test Tools: {', '.join(agent6_data.get('test_tools', [])) or 'None'}\n"
             f"  Risk Areas: {'; '.join(agent6_data.get('risk_areas', [])) or 'None'}"
         )
 
@@ -481,15 +487,19 @@ def _build_user_message(
             f"AGENT 7 — DATA NEEDS [confidence: {agent7_conf}]:\n"
             f"  Data Volume: {agent7_data.get('data_volume', 'N/A')}\n"
             f"  Sensitive Data: {agent7_data.get('sensitive_data_present', False)}\n"
+            f"  FCA Context Available: {agent7_data.get('fca_context_available', True)}\n"
             f"  Data Risks: {'; '.join(agent7_data.get('risks', [])) or 'None'}"
         )
 
     if agent8_data:
+        dep_types = agent8_data.get("detected_dependency_types", [])
         lines.append(
             f"AGENT 8 — DEPENDENCY MAPPING [confidence: {agent8_conf}]:\n"
             f"  Detected Objects: {', '.join(agent8_data.get('detected_objects', [])) or 'None'}\n"
             f"  Implied Objects: {', '.join(agent8_data.get('implied_objects', [])) or 'None'}\n"
-            f"  Dependency Depth: {agent8_data.get('dependency_depth', 0)}"
+            f"  Dependency Depth: {agent8_data.get('dependency_depth', 0)}\n"
+            f"  Has External Dependencies: {agent8_data.get('has_external_dependencies', False)}\n"
+            f"  Dependency Types: {', '.join(dep_types) or 'None'}"
         )
 
     lines.append("\nUse the assess_story_risks tool to return the risk register.")

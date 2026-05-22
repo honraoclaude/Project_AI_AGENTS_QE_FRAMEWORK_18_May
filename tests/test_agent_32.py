@@ -167,3 +167,52 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+
+# ── REQ-23: Development verdict wired + shared_components_stub ────────────────
+
+AGENT23_PARTIAL = {"development_verdict": "PARTIAL", "critical_failures": ["BDD Gherkin: INCOMPLETE"]}
+AGENT23_FAIL    = {"development_verdict": "FAIL",    "critical_failures": ["Coverage below threshold"]}
+AGENT23_PASS    = {"development_verdict": "PASS",    "critical_failures": []}
+
+
+class TestDevelopmentVerdictWiredREQ23:
+    def test_development_verdict_partial_elevates_risk(self):
+        risk, factors, _, _, _ = _assess_regression_risk(
+            AGENT3_LOW, AGENT13_LOW_RISK, AGENT18_CLEAN, AGENT23_PARTIAL
+        )
+        assert any("PARTIAL" in f or "development" in f.lower() for f in factors)
+
+    def test_development_verdict_fail_elevates_risk(self):
+        risk, _, _, _, _ = _assess_regression_risk(
+            AGENT3_LOW, AGENT13_LOW_RISK, AGENT18_CLEAN, AGENT23_FAIL
+        )
+        assert risk in ("MEDIUM", "HIGH")
+
+    def test_development_verdict_pass_no_extra_factor(self):
+        _, factors, _, _, _ = _assess_regression_risk(
+            AGENT3_LOW, AGENT13_LOW_RISK, AGENT18_CLEAN, AGENT23_PASS
+        )
+        assert not any("PARTIAL" in f or "FAIL" in f for f in factors)
+
+    def test_high_blast_objects_plus_depth_3_gives_full_suite(self):
+        agent13_high = {**AGENT13_HIGH_BLAST, "dependency_depth": 3}
+        _, _, _, suite, _ = _assess_regression_risk(
+            AGENT3_HIGH, agent13_high, AGENT18_CLEAN, None
+        )
+        assert suite == "FULL"
+
+
+@pytest.mark.asyncio
+class TestSharedComponentsStubREQ23:
+    async def test_shared_components_stub_true_in_output(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"]  = {"data": AGENT3_HIGH}
+        state["agent_results"]["13"] = {"data": AGENT13_HIGH_BLAST}
+
+        with patch("src.agents.testing.agent_32_regression_risk_assessor.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_HIGH
+            result = await run(state)
+
+        assert result.data.get("shared_components_stub") is True

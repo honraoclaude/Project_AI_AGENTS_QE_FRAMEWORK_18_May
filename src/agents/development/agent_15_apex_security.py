@@ -36,12 +36,16 @@ from src.core.schemas import AgentResult, ConfidenceBreakdown, StoryState
 AGENT_ID = 15
 AGENT_NAME = "Apex Security Scanner"
 
-# FSC objects where CRUD/FLS enforcement is non-negotiable under FCA rules
+# FSC objects where CRUD/FLS enforcement is non-negotiable under FCA rules.
+# FinancialAccount and FinancialHolding are standard FSC AUM objects regulated under COBS 9A/COBS 4.
+# Standard FSC objects have no __c suffix — Agent 13 returns them as bare lowercase names.
 _HIGH_RISK_OBJECTS = frozenset({
     "suitability__c",
     "riskprofile__c",
     "appropriateness__c",
     "vulnerablecustomerindicator__c",
+    "financialaccount",
+    "financialholding",
 })
 
 # ── Haiku tool ────────────────────────────────────────────────────────────────
@@ -163,7 +167,9 @@ def _analyse_security_risk(
 
     high_risk_present = bool(detected & _HIGH_RISK_OBJECTS)
     crud_required = high_risk_present
-    sharing_required = fca_class in ("HIGH", "MEDIUM")
+    # Sharing model review only needed when BOTH FCA tier is elevated AND high-risk FSC objects
+    # are in scope — pure config/permission changes don't warrant it.
+    sharing_required = fca_class in ("HIGH", "MEDIUM") and high_risk_present
 
     flags: list[str] = []
 
@@ -175,7 +181,11 @@ def _analyse_security_risk(
 
     if sharing_required:
         flags.append(
-            f"{fca_class}-FCA story — sharing model must be reviewed for all changed Apex classes"
+            f"{fca_class}-FCA story with regulated FSC objects — sharing model must be reviewed for all changed Apex classes"
+        )
+    elif fca_class in ("HIGH", "MEDIUM") and not high_risk_present:
+        flags.append(
+            f"{fca_class}-FCA story — no regulated FSC objects detected; sharing model review not required for this change"
         )
 
     if depth >= 3:
@@ -183,12 +193,12 @@ def _analyse_security_risk(
             "Deep dependency chain (depth ≥ 3) — cross-object DML operations require bulkification and sharing review"
         )
 
-    # Risk level
+    # Risk level: HIGH/MEDIUM FCA + no FSC objects → LOW (no regulated object risk)
     if fca_class == "HIGH" and high_risk_present:
         risk_level = "HIGH"
     elif fca_class == "MEDIUM" and high_risk_present:
         risk_level = "MEDIUM"
-    elif high_risk_present or fca_class in ("HIGH", "MEDIUM"):
+    elif high_risk_present:
         risk_level = "MEDIUM"
     else:
         risk_level = "LOW"

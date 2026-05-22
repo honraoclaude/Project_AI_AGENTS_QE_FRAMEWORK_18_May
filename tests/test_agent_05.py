@@ -582,3 +582,183 @@ class TestMechanismDesign:
             result = await run(state)
 
         assert "generation_mode_trust" in result.data
+
+
+# ── REQ-03: vulnerable_customer scenario_type tests ──────────────────────────
+
+MOCK_AC_WITH_VC = {
+    "ac_clauses": [
+        {
+            "scenario": "Scenario: Adviser records suitability",
+            "scenario_type": "happy_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
+            "given": ["Given the client has a RiskProfile__c"],
+            "when": ["When the adviser submits the assessment"],
+            "then": ["Then a Suitability__c is created"],
+        },
+        {
+            "scenario": "Scenario: RiskProfile missing — blocked",
+            "scenario_type": "error_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
+            "given": ["Given the client has no RiskProfile__c"],
+            "when": ["When the adviser opens the flow"],
+            "then": ["Then an error is shown"],
+        },
+        {
+            "scenario": "Scenario: Duplicate assessment prevented",
+            "scenario_type": "edge_case",
+            "test_category": "REGRESSION",
+            "fca_relevant": False,
+            "given": ["Given a Suitability__c already exists"],
+            "when": ["When the adviser creates another"],
+            "then": ["Then the duplicate is blocked"],
+        },
+        {
+            "scenario": "Scenario: Vulnerable customer pathway triggers Consumer Duty step",
+            "scenario_type": "vulnerable_customer",
+            "test_category": "UI",
+            "fca_relevant": True,
+            "given": ["Given VulnerableCustomerIndicator__c is true for the client"],
+            "when": ["When the adviser reaches the final suitability step"],
+            "then": [
+                "Then the Consumer Duty confirmation checkbox is displayed",
+                "Then the assessment cannot be submitted without checking the box",
+            ],
+        },
+    ],
+    "generation_mode": "generated_from_scratch",
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": False,
+        "vulnerable_customer": True,
+    },
+    "gaps_filled": ["happy_path", "error_path", "edge_case", "vulnerable_customer"],
+    "remaining_gaps": [],
+}
+
+MOCK_AC_VC_MISSING = {
+    **MOCK_AC_GENERATED,
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": True,
+        "vulnerable_customer": False,
+    },
+}
+
+
+class TestVulnerableCustomerREQ03:
+    def test_vc_impact_true_with_vc_scenario_boosts_confidence(self):
+        score_with, _ = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": True, "cd_obligations": []},
+            MOCK_AC_WITH_VC,
+        )
+        score_without, _ = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": False, "cd_obligations": []},
+            MOCK_AC_WITH_VC,
+        )
+        assert score_with > score_without
+
+    def test_vc_impact_true_missing_vc_scenario_penalises_confidence(self):
+        score_present, _ = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": True, "cd_obligations": []},
+            MOCK_AC_WITH_VC,
+        )
+        score_missing, _ = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": True, "cd_obligations": []},
+            MOCK_AC_VC_MISSING,
+        )
+        assert score_present > score_missing
+
+    def test_vc_impact_false_no_penalty_when_vc_absent(self):
+        _, signals = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": False, "cd_obligations": []},
+            MOCK_AC_VC_MISSING,
+        )
+        assert "vulnerable_customer_scenario_missing" not in signals
+
+    def test_score_never_below_20_with_vc_penalty(self):
+        score, _ = _compute_confidence(
+            None, None,
+            {"vulnerable_customer_impact": True, "cd_obligations": []},
+            MOCK_AC_VC_MISSING,
+        )
+        assert score >= 20
+
+
+@pytest.mark.asyncio
+class TestVulnerableCustomerIntegrationREQ03:
+    async def test_vc_scenario_type_present_in_ac_clauses(self):
+        """REQ-03: vulnerable_customer_impact=True → ac_clauses contains vc scenario type."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+        state["agent_results"]["4"] = {"data": AGENT4_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_WITH_VC
+            result = await run(state)
+
+        vc_scenarios = [
+            c for c in result.data["ac_clauses"]
+            if c.get("scenario_type") == "vulnerable_customer"
+        ]
+        assert len(vc_scenarios) >= 1, "Must have at least 1 vulnerable_customer scenario"
+
+    async def test_coverage_assessment_has_vulnerable_customer_key(self):
+        """REQ-03: coverage_assessment dict must include vulnerable_customer bool."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["4"] = {"data": AGENT4_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_WITH_VC
+            result = await run(state)
+
+        assert "vulnerable_customer" in result.data["coverage_assessment"]
+        assert result.data["coverage_assessment"]["vulnerable_customer"] is True
+
+    async def test_vc_coverage_false_when_vc_scenario_absent(self):
+        """REQ-03: coverage_assessment.vulnerable_customer=False when no VC scenario present."""
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_VC_MISSING
+            result = await run(state)
+
+        assert result.data["coverage_assessment"]["vulnerable_customer"] is False

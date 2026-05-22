@@ -173,10 +173,10 @@ async def run(state: StoryState) -> AgentResult:
 
     # Compose What/Why/Data
     what = (
-        f"Extracted intent for {story_id}: goal='{extracted['goal']}', "
-        f"persona='{extracted['persona']}', "
-        f"fsc_objects={extracted['fsc_objects']}, "
-        f"ac_present={extracted['ac_present']}"
+        f"Extracted intent for {story_id}: goal='{extracted.get('goal', 'UNKNOWN')}', "
+        f"persona='{extracted.get('persona', 'UNKNOWN')}', "
+        f"fsc_objects={extracted.get('fsc_objects', [])}, "
+        f"ac_present={extracted.get('ac_present', False)}"
     )
     why = (
         "Story Intent Agent parsed Jira description and acceptance criteria to produce "

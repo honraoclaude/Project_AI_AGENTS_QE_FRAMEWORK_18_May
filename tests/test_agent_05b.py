@@ -10,7 +10,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_05b_ac_challenger import _compute_confidence, run
+from src.agents.refinement.agent_05b_ac_challenger import (
+    _build_user_message,
+    _FINDING_SCHEMA,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
+    _compute_confidence,
+    run,
+)
 from src.core.schemas import initial_story_state
 
 
@@ -298,3 +305,149 @@ def test_confidence_signals_dict_populated():
     )
     assert isinstance(signals, dict)
     assert len(signals) > 0
+
+
+# ── Tests: untested signal branches ───────────────────────────────────────────
+
+def test_adequate_ac_set_signal_in_signals():
+    _, signals = _compute_confidence(ac_count=4, survivor_count=4, critical_count=0, findings=[])
+    assert "adequate_ac_set" in signals
+
+
+def test_moderate_survival_rate_signal_in_signals():
+    _, signals = _compute_confidence(ac_count=4, survivor_count=2, critical_count=0, findings=[])
+    assert "moderate_survival_rate" in signals
+
+
+def test_no_acs_to_challenge_signal_in_signals():
+    _, signals = _compute_confidence(ac_count=0, survivor_count=0, critical_count=0, findings=[])
+    assert "no_acs_to_challenge" in signals
+
+
+# ── Tests: signal stored values ───────────────────────────────────────────────
+
+def test_rich_ac_set_stores_count():
+    _, signals = _compute_confidence(ac_count=10, survivor_count=10, critical_count=0, findings=[])
+    assert signals["rich_ac_set"] == 10
+
+
+def test_high_survival_rate_stores_rounded_rate():
+    _, signals = _compute_confidence(ac_count=8, survivor_count=8, critical_count=0, findings=[])
+    assert signals["high_survival_rate"] == 1.0
+
+
+def test_diverse_findings_stores_type_count():
+    findings = [
+        {"weakness_type": "ambiguous_given"},
+        {"weakness_type": "non_observable_then"},
+        {"weakness_type": "weak_regulatory"},
+    ]
+    _, signals = _compute_confidence(ac_count=6, survivor_count=3, critical_count=0, findings=findings)
+    assert signals["diverse_findings"] == 3
+
+
+# ── Tests: integration gaps ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_model_used_and_tier():
+    state = _state_with_agent5_clauses(SAMPLE_AC_CLAUSES)
+    with patch(
+        "src.agents.refinement.agent_05b_ac_challenger.call_with_tool",
+        new_callable=AsyncMock,
+        return_value=MOCK_CHALLENGE_RESULT_NO_FINDINGS,
+    ):
+        result = await run(state)
+
+    assert result.model_used == "claude-sonnet-4-6"
+    assert result.confidence.tier == "B"
+
+
+@pytest.mark.asyncio
+async def test_challenge_summary_is_non_empty_string():
+    state = _state_with_agent5_clauses(SAMPLE_AC_CLAUSES)
+    with patch(
+        "src.agents.refinement.agent_05b_ac_challenger.call_with_tool",
+        new_callable=AsyncMock,
+        return_value=MOCK_CHALLENGE_RESULT_NO_FINDINGS,
+    ):
+        result = await run(state)
+
+    assert isinstance(result.data["challenge_summary"], str)
+    assert len(result.data["challenge_summary"]) > 0
+
+
+# ── Tests: prompt content ─────────────────────────────────────────────────────
+
+class TestPromptContent:
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_fca_class(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "HIGH" in msg
+
+    def test_prompt_includes_clause_count(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert str(len(SAMPLE_AC_CLAUSES)) in msg
+
+    def test_prompt_includes_ac_clauses_section(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "AC CLAUSES TO CHALLENGE:" in msg
+
+    def test_prompt_includes_clause_index(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "[Clause 0]" in msg
+
+    def test_prompt_includes_scenario_type_and_category(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "scenario_type" in msg
+        assert "test_category" in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("challenge_findings.")
+
+
+# ── Tests: schema contract ────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_tool_schema_has_four_required_fields(self):
+        expected = {
+            "challenge_summary",
+            "survivor_count",
+            "critical_weakness_count",
+            "challenge_findings",
+        }
+        assert set(_TOOL_SCHEMA["required"]) == expected
+
+    def test_challenge_summary_is_string(self):
+        assert _TOOL_SCHEMA["properties"]["challenge_summary"]["type"] == "string"
+
+    def test_survivor_count_has_minimum_zero(self):
+        assert _TOOL_SCHEMA["properties"]["survivor_count"]["minimum"] == 0
+
+    def test_critical_weakness_count_has_minimum_zero(self):
+        assert _TOOL_SCHEMA["properties"]["critical_weakness_count"]["minimum"] == 0
+
+    def test_challenge_findings_is_array(self):
+        assert _TOOL_SCHEMA["properties"]["challenge_findings"]["type"] == "array"
+
+    def test_finding_schema_has_five_required_fields(self):
+        expected = {"clause_index", "scenario", "weakness_type", "severity", "detail"}
+        assert set(_FINDING_SCHEMA["required"]) == expected
+
+    def test_weakness_type_enum_has_five_values(self):
+        schema = _FINDING_SCHEMA["properties"]["weakness_type"]
+        assert schema["enum"] == [
+            "ambiguous_given",
+            "non_observable_then",
+            "missing_error_path",
+            "weak_regulatory",
+            "untestable",
+        ]
+
+    def test_severity_enum_has_three_values(self):
+        schema = _FINDING_SCHEMA["properties"]["severity"]
+        assert schema["enum"] == ["CRITICAL", "MAJOR", "MINOR"]

@@ -11,7 +11,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_05_ac_generator import _compute_confidence, run
+from src.agents.refinement.agent_05_ac_generator import (
+    _AC_CLAUSE_SCHEMA,
+    _build_user_message,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
+    _compute_confidence,
+    run,
+)
 from src.core.schemas import initial_story_state
 
 
@@ -329,6 +336,42 @@ class TestConfidenceScoring:
         _, signals = _compute_confidence(AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH, MOCK_AC_VALIDATED)
         assert "full_coverage" in signals
 
+    def test_supplemented_existing_signal_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH, MOCK_AC_SUPPLEMENTED)
+        assert "supplemented_existing" in signals
+        assert signals["supplemented_existing"] is True
+
+    def test_clause_count_below_2_adds_penalty_signal(self):
+        _, signals = _compute_confidence(None, None, None, MOCK_AC_ZERO_CLAUSES)
+        assert "clause_count" in signals
+        assert signals["clause_count"] == 0
+
+    def test_rich_description_boosts_confidence(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, None, None, MOCK_AC_GENERATED)
+        assert "rich_description" in signals
+        assert signals["rich_description"] == 200
+
+    def test_sparse_description_reduces_confidence(self):
+        _, signals = _compute_confidence(AGENT1_DATA_SPARSE, None, None, MOCK_AC_GENERATED)
+        assert "sparse_description" in signals
+        assert signals["sparse_description"] == 20
+
+    def test_good_coverage_signal_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT3_DATA_HIGH, None, MOCK_AC_NO_REGULATORY)
+        assert "good_coverage" in signals
+
+    def test_partial_coverage_signal_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT3_DATA_LOW, None, MOCK_AC_LOW_FCA)
+        assert "partial_coverage" in signals
+
+    def test_cd_obligations_covered_signal_in_signals(self):
+        _, signals = _compute_confidence(None, None, AGENT4_DATA_HIGH, MOCK_AC_GENERATED)
+        assert "cd_obligations_covered" in signals
+
+    def test_cd_obligations_uncovered_signal_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH, MOCK_AC_NO_REGULATORY)
+        assert "cd_obligations_uncovered" in signals
+
 
 # ── Integration tests — full agent run with mocked LLM and Jira ───────────────
 
@@ -498,6 +541,65 @@ class TestAgentRun:
         assert result.agent_id == 5
         assert result.data["ac_clause_count"] == 4
 
+    async def test_zero_clauses_causes_escalation(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_ZERO_CLAUSES
+
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_fca_classification_context_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_GENERATED
+
+            result = await run(state)
+
+        assert result.data["fca_classification_context"] == "HIGH"
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_AC_GENERATED
+
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
 
 # ── Mechanism design signal tests ─────────────────────────────────────────────
 
@@ -583,6 +685,27 @@ class TestMechanismDesign:
 
         assert "generation_mode_trust" in result.data
 
+    async def test_supplemented_existing_trust_is_0_8(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_05_ac_generator.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_05_ac_generator.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_05_ac_generator.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = [{"scenario": "existing", "given": [], "when": [], "then": []}]
+            mock_llm.return_value = MOCK_AC_SUPPLEMENTED
+
+            result = await run(state)
+
+        assert result.data["generation_mode"] == "supplemented_existing"
+        assert result.data["generation_mode_trust"] == 0.8
+
 
 # ── REQ-03: vulnerable_customer scenario_type tests ──────────────────────────
 
@@ -650,6 +773,75 @@ MOCK_AC_VC_MISSING = {
         "vulnerable_customer": False,
     },
 }
+
+MOCK_AC_SUPPLEMENTED = {
+    "ac_clauses": [
+        {
+            "scenario": "Scenario: Adviser records suitability",
+            "scenario_type": "happy_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
+            "given": ["Given the client has a RiskProfile__c"],
+            "when": ["When the adviser submits"],
+            "then": ["Then a Suitability__c is created"],
+        },
+        {
+            "scenario": "Scenario: Missing RiskProfile blocks assessment",
+            "scenario_type": "error_path",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
+            "given": ["Given no RiskProfile__c"],
+            "when": ["When the flow is opened"],
+            "then": ["Then an error is shown"],
+        },
+        {
+            "scenario": "Scenario: Duplicate assessment prevented",
+            "scenario_type": "edge_case",
+            "test_category": "REGRESSION",
+            "fca_relevant": False,
+            "given": ["Given a Suitability__c already exists"],
+            "when": ["When the adviser creates another"],
+            "then": ["Then the duplicate is blocked"],
+        },
+        {
+            "scenario": "Scenario: COBS 9.2 regulatory check",
+            "scenario_type": "regulatory",
+            "test_category": "FUNCTIONAL",
+            "fca_relevant": True,
+            "given": ["Given COBS 9.2 applies to this client"],
+            "when": ["When the suitability assessment is submitted"],
+            "then": ["Then a COBS 9.2 compliance record is created"],
+        },
+    ],
+    "generation_mode": "supplemented_existing",
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": True,
+        "vulnerable_customer": False,
+    },
+    "gaps_filled": ["regulatory: COBS 9.2 scenario added"],
+    "remaining_gaps": [],
+}
+
+MOCK_AC_ZERO_CLAUSES = {
+    "ac_clauses": [],
+    "generation_mode": "generated_from_scratch",
+    "coverage_assessment": {
+        "happy_path": False,
+        "error_paths": False,
+        "edge_cases": False,
+        "regulatory": False,
+        "vulnerable_customer": False,
+    },
+    "gaps_filled": [],
+    "remaining_gaps": ["Description too sparse to generate ACs."],
+}
+
+AGENT1_DATA_RICH = {**AGENT1_DATA, "description_word_count": 200}
+AGENT1_DATA_SPARSE = {**AGENT1_DATA, "description_word_count": 20}
+STORY_NO_DESCRIPTION = {**STORY_LABEL_CHANGE, "story_id": "FSC-2501", "description": None}
 
 
 class TestVulnerableCustomerREQ03:
@@ -762,3 +954,121 @@ class TestVulnerableCustomerIntegrationREQ03:
             result = await run(state)
 
         assert result.data["coverage_assessment"]["vulnerable_customer"] is False
+
+
+# ── Prompt content unit tests (no LLM, no Jira) ───────────────────────────────
+
+class TestPromptContent:
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_summary(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH)
+        assert STORY_SUITABILITY["summary"] in msg
+
+    def test_prompt_includes_components(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH)
+        assert "COMPONENTS:" in msg
+
+    def test_prompt_empty_components_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None, None, None)
+        assert "COMPONENTS: None" in msg
+
+    def test_prompt_empty_description_shows_empty(self):
+        msg = _build_user_message(STORY_NO_DESCRIPTION, [], None, None, None)
+        assert "(empty)" in msg
+
+    def test_prompt_existing_acs_present_shows_section(self):
+        existing = [{"scenario": "Scenario: existing", "given": [], "when": [], "then": []}]
+        msg = _build_user_message(STORY_SUITABILITY, existing, None, None, None)
+        assert "EXISTING ACCEPTANCE CRITERIA (from Jira):" in msg
+
+    def test_prompt_no_existing_acs_shows_none_in_jira(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None, None)
+        assert "None in Jira." in msg
+
+    def test_prompt_includes_agent1_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, None, None)
+        assert "AGENT 1 — STORY INTENT:" in msg
+        assert "Goal:" in msg
+        assert "Missing Elements:" in msg
+
+    def test_prompt_agent1_section_absent_when_no_agent1_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None, None)
+        assert "AGENT 1 — STORY INTENT:" not in msg
+
+    def test_prompt_includes_agent3_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, AGENT3_DATA_HIGH, None)
+        assert "AGENT 3 — FCA CLASSIFICATION:" in msg
+        assert "FCA Triggers:" in msg
+
+    def test_prompt_agent3_section_absent_when_no_agent3_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None, None)
+        assert "AGENT 3 — FCA CLASSIFICATION:" not in msg
+
+    def test_prompt_includes_agent4_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None, AGENT4_DATA_HIGH)
+        assert "AGENT 4 — CONSUMER DUTY:" in msg
+        assert "CD Verdict:" in msg
+        assert "CD Obligations:" in msg
+
+    def test_prompt_agent4_section_absent_when_no_agent4_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None, None)
+        assert "AGENT 4 — CONSUMER DUTY:" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, AGENT3_DATA_HIGH, AGENT4_DATA_HIGH)
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("AC set.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_tool_schema_has_five_required_fields(self):
+        expected = {
+            "generation_mode",
+            "coverage_assessment",
+            "ac_clauses",
+            "gaps_filled",
+            "remaining_gaps",
+        }
+        assert set(_TOOL_SCHEMA["required"]) == expected
+
+    def test_generation_mode_is_enum_with_three_values(self):
+        schema = _TOOL_SCHEMA["properties"]["generation_mode"]
+        assert schema["enum"] == ["generated_from_scratch", "supplemented_existing", "validated_existing"]
+
+    def test_coverage_assessment_has_five_required_subfields(self):
+        expected = {"happy_path", "error_paths", "edge_cases", "regulatory", "vulnerable_customer"}
+        subschema = _TOOL_SCHEMA["properties"]["coverage_assessment"]
+        assert set(subschema["required"]) == expected
+
+    def test_ac_clauses_is_array(self):
+        assert _TOOL_SCHEMA["properties"]["ac_clauses"]["type"] == "array"
+
+    def test_gaps_filled_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["gaps_filled"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_remaining_gaps_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["remaining_gaps"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_ac_clause_schema_has_seven_required_fields(self):
+        expected = {"scenario", "scenario_type", "test_category", "fca_relevant", "given", "when", "then"}
+        assert set(_AC_CLAUSE_SCHEMA["required"]) == expected
+
+    def test_scenario_type_enum_has_five_values(self):
+        schema = _AC_CLAUSE_SCHEMA["properties"]["scenario_type"]
+        assert schema["enum"] == ["happy_path", "error_path", "edge_case", "regulatory", "vulnerable_customer"]
+
+    def test_test_category_enum_has_five_values(self):
+        schema = _AC_CLAUSE_SCHEMA["properties"]["test_category"]
+        assert set(schema["enum"]) == {"UNIT", "UI", "FUNCTIONAL", "REGRESSION", "AUTOMATION_CANDIDATE"}
+
+    def test_fca_relevant_is_boolean_in_clause_schema(self):
+        assert _AC_CLAUSE_SCHEMA["properties"]["fca_relevant"]["type"] == "boolean"

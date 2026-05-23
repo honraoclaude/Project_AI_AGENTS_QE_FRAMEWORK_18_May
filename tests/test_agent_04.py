@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_04_consumer_duty import _compute_confidence, run
+from src.agents.refinement.agent_04_consumer_duty import (
+    _build_user_message,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
+    _compute_confidence,
+    run,
+)
 from src.core.schemas import initial_story_state
 
 
@@ -179,6 +185,69 @@ MOCK_CD_AT_RISK = {
     ),
 }
 
+AGENT3_DATA_MEDIUM = {
+    "fca_classification": "MEDIUM",
+    "classification_rationale": "Story touches FinancialAccount display logic.",
+    "fca_triggers": ["FinancialAccount", "LWC_Component"],
+    "regulatory_obligations": ["PS22/9 Consumer Understanding"],
+    "co_signoff_required": False,
+    "enhanced_testing_required": True,
+    "ensemble_agreement": True,
+    "call_a_classification": "MEDIUM",
+    "call_b_classification": "MEDIUM",
+    "tier_gap": 0,
+    "signals": {},
+}
+
+AGENT3_DATA_UNCLASSIFIED = {
+    "fca_classification": "UNCLASSIFIED",
+    "classification_rationale": "Insufficient context to classify.",
+    "fca_triggers": [],
+    "regulatory_obligations": [],
+    "co_signoff_required": False,
+    "enhanced_testing_required": False,
+    "ensemble_agreement": True,
+    "call_a_classification": "UNCLASSIFIED",
+    "call_b_classification": "UNCLASSIFIED",
+    "tier_gap": 0,
+    "signals": {},
+}
+
+AGENT3_DATA_HIGH_NO_TRIGGERS = {
+    **AGENT3_DATA_HIGH,
+    "fca_triggers": [],
+    "regulatory_obligations": [],
+}
+
+MOCK_CD_NOT_APPLICABLE_UI_TOUCH = {
+    **MOCK_CD_NOT_APPLICABLE,
+    "ui_or_support_touch": True,
+}
+
+MOCK_CD_RISKS_NO_OBLIGATIONS = {
+    "cd_outcomes_affected": ["consumer_understanding"],
+    "vulnerable_customer_impact": False,
+    "vulnerable_customer_rationale": "No vulnerable customer pathway.",
+    "cd_obligations": [],
+    "cd_risks": ["No AC covers the error scenario."],
+    "cd_evidence_required": [],
+    "cd_verdict": "AT_RISK",
+    "cd_rationale": "Story has risks but no obligations mapped.",
+}
+
+MOCK_CD_NON_COMPLIANT = {
+    "cd_outcomes_affected": ["consumer_support"],
+    "vulnerable_customer_impact": True,
+    "vulnerable_customer_rationale": "Story removes the Consumer Duty confirmation step.",
+    "cd_obligations": ["PS22/9 Outcome 4 — customers must be able to access support."],
+    "cd_risks": ["Consumer Duty confirmation step has been removed from the flow."],
+    "cd_evidence_required": ["Impact assessment for removal of CD confirmation step."],
+    "cd_verdict": "NON_COMPLIANT",
+    "cd_rationale": "Story explicitly removes the Consumer Duty confirmation step, violating PS22/9 Outcome 4.",
+}
+
+STORY_NO_DESCRIPTION = {**STORY_LABEL_CHANGE, "story_id": "FSC-2501", "description": None}
+
 
 # ── Confidence scoring unit tests (no LLM, no Jira) ──────────────────────────
 
@@ -222,6 +291,47 @@ class TestConfidenceScoring:
     def test_not_applicable_adds_confidence_signal(self):
         _, signals = _compute_confidence(AGENT3_DATA_LOW, MOCK_CD_NOT_APPLICABLE)
         assert "not_applicable_verdict" in signals
+
+    def test_fca_medium_signal_stored(self):
+        _, signals = _compute_confidence(AGENT3_DATA_MEDIUM, MOCK_CD_AT_RISK)
+        assert "fca_medium" in signals
+        assert signals["fca_medium"] == "MEDIUM"
+
+    def test_fca_unclassified_signal_reduces_confidence(self):
+        score, signals = _compute_confidence(AGENT3_DATA_UNCLASSIFIED, MOCK_CD_AT_RISK)
+        assert "fca_unclassified" in signals
+        assert score >= 20, "Floor must hold even for unclassified path"
+
+    def test_no_triggers_but_high_classified_adds_penalty_signal(self):
+        _, signals = _compute_confidence(AGENT3_DATA_HIGH_NO_TRIGGERS, MOCK_CD_AT_RISK)
+        assert "no_triggers_but_classified" in signals
+        assert signals["no_triggers_but_classified"] is True
+
+    def test_not_applicable_with_ui_touch_adds_penalty_signal(self):
+        _, signals = _compute_confidence(AGENT3_DATA_LOW, MOCK_CD_NOT_APPLICABLE_UI_TOUCH)
+        assert "not_applicable_but_ui_touch" in signals
+        assert "not_applicable_verdict" not in signals
+
+    def test_risks_without_obligations_adds_penalty_signal(self):
+        _, signals = _compute_confidence(AGENT3_DATA_HIGH, MOCK_CD_RISKS_NO_OBLIGATIONS)
+        assert "risks_without_obligations" in signals
+        assert signals["risks_without_obligations"] is True
+
+    def test_fca_triggers_present_stores_count(self):
+        _, signals = _compute_confidence(AGENT3_DATA_HIGH, MOCK_CD_HIGH_COMPLIANT)
+        assert signals["fca_triggers_present"] == 4
+
+    def test_obligations_present_stores_count(self):
+        _, signals = _compute_confidence(AGENT3_DATA_HIGH, MOCK_CD_HIGH_COMPLIANT)
+        assert signals["obligations_present"] == 2
+
+    def test_vulnerable_customer_in_triggers_stores_true(self):
+        _, signals = _compute_confidence(AGENT3_DATA_HIGH, MOCK_CD_HIGH_COMPLIANT)
+        assert signals["vulnerable_customer_in_triggers"] is True
+
+    def test_agent3_unavailable_stores_true(self):
+        _, signals = _compute_confidence(None, MOCK_CD_HIGH_COMPLIANT)
+        assert signals["agent3_unavailable"] is True
 
 
 # ── Integration tests — full agent run with mocked LLM and Jira ───────────────
@@ -464,3 +574,212 @@ class TestAgentRun:
 
         assert "FSC-2417" in result.what
         assert "COMPLIANT" in result.what
+
+    async def test_non_compliant_verdict_for_story_disabling_control(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_CD_NON_COMPLIANT
+
+            result = await run(state)
+
+        assert result.data["cd_verdict"] == "NON_COMPLIANT"
+        assert isinstance(result.data["cd_rationale"], str) and len(result.data["cd_rationale"]) > 0
+
+    async def test_no_agent3_data_causes_escalation(self):
+        state = initial_story_state("FSC-2417")  # no agent_results
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_CD_HIGH_COMPLIANT
+
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_cd_rationale_is_non_empty_string(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_CD_HIGH_COMPLIANT
+
+            result = await run(state)
+
+        assert isinstance(result.data["cd_rationale"], str)
+        assert len(result.data["cd_rationale"]) > 0
+
+    async def test_signals_key_in_data_is_dict(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_CD_HIGH_COMPLIANT
+
+            result = await run(state)
+
+        assert "signals" in result.data
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_vulnerable_customer_rationale_is_string(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_DATA_HIGH}
+
+        with (
+            patch("src.agents.refinement.agent_04_consumer_duty.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_04_consumer_duty.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_04_consumer_duty.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_CD_HIGH_COMPLIANT
+
+            result = await run(state)
+
+        assert isinstance(result.data["vulnerable_customer_rationale"], str)
+
+
+# ── Prompt content unit tests (no LLM, no Jira) ───────────────────────────────
+
+class TestPromptContent:
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA, AGENT3_DATA_HIGH)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_summary(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA, AGENT3_DATA_HIGH)
+        assert STORY_SUITABILITY["summary"] in msg
+
+    def test_prompt_includes_components(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA, AGENT3_DATA_HIGH)
+        assert "COMPONENTS:" in msg
+
+    def test_prompt_empty_components_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None, None)
+        assert "COMPONENTS: None" in msg
+
+    def test_prompt_empty_description_shows_empty(self):
+        msg = _build_user_message(STORY_NO_DESCRIPTION, [], None, None)
+        assert "(empty)" in msg
+
+    def test_prompt_ac_present_shows_scenario_structure(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, None, None)
+        assert "ACCEPTANCE CRITERIA:" in msg
+        assert "Scenario" in msg
+        assert "Given" in msg
+        assert "Then" in msg
+
+    def test_prompt_ac_absent_shows_none_provided(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None)
+        assert "None provided." in msg
+
+    def test_prompt_includes_agent3_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, AGENT3_DATA_HIGH)
+        assert "AGENT 3 FCA CLASSIFICATION" in msg
+        assert "FCA Tier:" in msg
+
+    def test_prompt_agent3_section_absent_when_no_agent3_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None)
+        assert "AGENT 3 FCA CLASSIFICATION" not in msg
+
+    def test_prompt_includes_agent1_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], AGENT1_DATA, None)
+        assert "AGENT 1 STORY INTENT" in msg
+        assert "Persona:" in msg
+
+    def test_prompt_agent1_section_absent_when_no_agent1_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, [], None, None)
+        assert "AGENT 1 STORY INTENT" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA, AGENT3_DATA_HIGH)
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("assessment.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_all_eight_fields_are_required(self):
+        expected = {
+            "cd_outcomes_affected",
+            "vulnerable_customer_impact",
+            "vulnerable_customer_rationale",
+            "cd_obligations",
+            "cd_risks",
+            "cd_evidence_required",
+            "cd_verdict",
+            "cd_rationale",
+        }
+        assert set(_TOOL_SCHEMA["required"]) == expected
+
+    def test_ui_or_support_touch_is_optional_not_required(self):
+        assert "ui_or_support_touch" not in _TOOL_SCHEMA["required"]
+        assert "ui_or_support_touch" in _TOOL_SCHEMA["properties"]
+
+    def test_cd_outcomes_affected_is_array_of_enum(self):
+        schema = _TOOL_SCHEMA["properties"]["cd_outcomes_affected"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+        assert len(schema["items"]["enum"]) == 5
+
+    def test_cd_verdict_is_enum_with_four_values(self):
+        schema = _TOOL_SCHEMA["properties"]["cd_verdict"]
+        assert schema["enum"] == ["COMPLIANT", "AT_RISK", "NON_COMPLIANT", "NOT_APPLICABLE"]
+
+    def test_vulnerable_customer_impact_is_boolean(self):
+        assert _TOOL_SCHEMA["properties"]["vulnerable_customer_impact"]["type"] == "boolean"
+
+    def test_cd_obligations_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["cd_obligations"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_cd_risks_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["cd_risks"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_cd_evidence_required_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["cd_evidence_required"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"

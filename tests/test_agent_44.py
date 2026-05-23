@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_44_fca_evidence_pack import (
+    _build_evidence_message,
     _compute_confidence,
+    _EVIDENCE_TOOL_NAME,
+    _EVIDENCE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -76,6 +79,15 @@ MOCK_EVIDENCE_LOW_FCA = {
     "narrative": "FCA classification is LOW — minimal regulatory evidence required. Consumer Duty obligations confirmed. Story may proceed.",
 }
 
+MOCK_EVIDENCE_MISSING = {
+    "evidence_items": [],
+    "consumer_duty_covered": False,
+    "regulatory_sign_off_ready": False,
+    "evidence_verdict": "MISSING",
+    "evidence_gaps": ["Consumer Duty PS22/9", "COBS 9 Suitability"],
+    "narrative": "No FCA evidence available — all regulatory requirements are unmet.",
+}
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -101,6 +113,34 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, None, "MISSING", _EMPTY_STATE)
         assert score >= 20
+
+    def test_fca_classification_known_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, None, None, None, "COMPLETE", _EMPTY_STATE)
+        assert "fca_classification_known" in signals
+
+    def test_fca_class_unknown_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, "MISSING", _EMPTY_STATE)
+        assert "fca_class_unknown" in signals
+
+    def test_fca_scenarios_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT30_FULL, None, None, "COMPLETE", _EMPTY_STATE)
+        assert "fca_scenarios_available" in signals
+
+    def test_coverage_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, AGENT33_PASS, None, "COMPLETE", _EMPTY_STATE)
+        assert "coverage_data_available" in signals
+
+    def test_evidence_complete_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
+        assert "evidence_complete" in signals
+
+    def test_evidence_missing_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, "MISSING", _EMPTY_STATE)
+        assert "evidence_missing" in signals
+
+    def test_shapley_attributions_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF, "COMPLETE", _EMPTY_STATE)
+        assert "shapley_attributions" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -200,6 +240,47 @@ class TestAgentRun:
         assert result.agent_id == 44
         assert result.data["evidence_verdict"] in ("COMPLETE", "PARTIAL", "MISSING")
 
+    async def test_escalated_when_no_upstream_and_missing_verdict(self):
+        # base=65, fca_class_unknown→-10=55, evidence_missing→-10=45 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_MISSING
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_44_fca_evidence_pack.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_EVIDENCE_COMPLETE
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
 
 # ── TA-enhanced Shapley tests ─────────────────────────────────────────────────
 
@@ -261,9 +342,6 @@ class TestTAEnhancedShapley:
 
 # ── REQ-28: new tests ─────────────────────────────────────────────────────────
 
-from src.agents.release.agent_44_fca_evidence_pack import _build_evidence_message
-
-
 class TestREQ28CdObligationsKeyFix:
     def test_cd_obligations_key_used_not_obligations_mapped(self):
         agent4_with_obligations = {
@@ -306,3 +384,73 @@ class TestREQ28Agent29Fallback:
             agent29, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
         )
         assert "SIGNED_OFF" in msg
+
+    def test_no_agent29_and_no_agent36_gives_not_required(self):
+        # both absent → uat_coord defaults to "NOT_REQUIRED"
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS, None, AGENT30_FULL, AGENT33_PASS, None,
+        )
+        assert "NOT_REQUIRED" in msg
+
+    def test_co_not_required_from_agent29_gives_not_required(self):
+        agent29 = {"co_sign_off_required": False}
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS,
+            agent29, AGENT30_FULL, AGENT33_PASS, None,
+        )
+        assert "NOT_REQUIRED" in msg
+
+
+# ── Evidence message content tests ───────────────────────────────────────────
+
+class TestBuildEvidenceMessage:
+    def test_includes_story_id(self):
+        msg = _build_evidence_message(
+            "FSC-2417", AGENT3_HIGH, AGENT4_PASS, None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_classification(self):
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS, None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert "HIGH" in msg
+
+    def test_includes_fca_scenario_count(self):
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS, None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert "4" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_evidence_message(
+            "FSC-001", AGENT3_HIGH, AGENT4_PASS, None, AGENT30_FULL, AGENT33_PASS, AGENT36_SIGNED_OFF,
+        )
+        assert _EVIDENCE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_six_required_fields(self):
+        assert set(_EVIDENCE_TOOL_SCHEMA["required"]) == {
+            "evidence_items", "consumer_duty_covered", "regulatory_sign_off_ready",
+            "evidence_verdict", "evidence_gaps", "narrative",
+        }
+
+    def test_evidence_verdict_enum_has_three_values(self):
+        assert _EVIDENCE_TOOL_SCHEMA["properties"]["evidence_verdict"]["enum"] == [
+            "COMPLETE", "PARTIAL", "MISSING",
+        ]
+
+    def test_evidence_items_required_fields(self):
+        item_schema = _EVIDENCE_TOOL_SCHEMA["properties"]["evidence_items"]["items"]
+        assert set(item_schema["required"]) == {"rule", "status", "evidence_ref"}
+
+    def test_item_status_enum_values(self):
+        item_schema = _EVIDENCE_TOOL_SCHEMA["properties"]["evidence_items"]["items"]
+        assert item_schema["properties"]["status"]["enum"] == ["COVERED", "PARTIAL", "MISSING"]
+
+    def test_narrative_is_string(self):
+        assert _EVIDENCE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"

@@ -6,7 +6,10 @@ import pytest
 
 from src.agents.development.agent_16_bulk_quality import (
     _analyse_bulk_risk,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -94,6 +97,32 @@ class TestBulkRiskAnalysis:
         # Agent 13 depth=0 — HIGH FCA but depth < 2, so not HIGH risk
         assert risk == "MEDIUM"
 
+    def test_medium_fca_depth_2_triggers_soql_factor(self):
+        # MEDIUM FCA + depth=2 + <3 objects → factors 1/2/3 all False → factor 4 fires
+        agent13_one = {"detected_objects": ["financialaccount"], "dependency_depth": 2}
+        _, factors, _ = _analyse_bulk_risk(AGENT3_MEDIUM, None, agent13_one)
+        assert any("soql" in f.lower() for f in factors)
+
+    def test_three_fsc_objects_low_depth_gives_medium_and_fires_factor3(self):
+        # 3 detected objects but depth < 3 → Factor 3 fires in isolation (not Factor 1)
+        agent13_three = {"detected_objects": ["a__c", "b__c", "c__c"], "dependency_depth": 1}
+        risk, factors, _ = _analyse_bulk_risk(AGENT3_LOW, None, agent13_three)
+        assert risk == "MEDIUM"
+        assert any("FSC objects in scope" in f for f in factors)
+
+    def test_single_object_depth_1_gives_medium_risk(self):
+        # 1 detected + depth >= 1 → MEDIUM via the depth >= 1 branch
+        agent13_one = {"detected_objects": ["financialaccount"], "dependency_depth": 1}
+        risk, _, async_rec = _analyse_bulk_risk(AGENT3_LOW, None, agent13_one)
+        assert risk == "MEDIUM"
+        assert async_rec is False
+
+    def test_medium_fca_depth_2_not_high_risk(self):
+        # Only HIGH FCA + depth >= 2 triggers HIGH; MEDIUM FCA + depth=2 stays MEDIUM
+        agent13_d2 = {"detected_objects": ["financialaccount"], "dependency_depth": 2}
+        risk, _, _ = _analyse_bulk_risk(AGENT3_MEDIUM, None, agent13_d2)
+        assert risk == "MEDIUM"
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -119,6 +148,27 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, 0)
         assert score >= 20
+
+    def test_metadata_scope_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_DEEP, 3)
+        assert "metadata_scope_available" in signals
+
+    def test_metadata_scope_unavailable_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, None, 0)
+        assert "metadata_scope_unavailable" in signals
+
+    def test_fca_class_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_DEEP, 3)
+        assert "fca_class_available" in signals
+
+    def test_dependency_depth_known_stores_depth(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_DEEP, 3)
+        assert signals["dependency_depth_known"] == 3
+
+    def test_zero_depth_confirmed_key_in_signals(self):
+        # depth=0 AND agent13 present → zero_depth_confirmed fires
+        _, signals = _compute_confidence(AGENT3_LOW, AGENT13_SHALLOW, 0)
+        assert "zero_depth_confirmed" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -194,3 +244,92 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=65, metadata_scope_unavailable=-10 → 55 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_16_bulk_quality.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_16_bulk_quality.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_16_bulk_quality.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["13"] = {"data": AGENT13_DEEP}
+
+        with patch("src.agents.development.agent_16_bulk_quality.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_HIGH
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], 3, "HIGH", ["bulk factor"])
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], 3, "HIGH", ["bulk factor"])
+        assert "HIGH" in msg
+
+    def test_includes_depth(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], 3, "HIGH", ["bulk factor"])
+        assert "Dependency depth: 3" in msg
+
+    def test_empty_detected_shows_none(self):
+        msg = _build_trace_message("FSC-2417", "LOW", [], 0, "LOW", ["no risk"])
+        assert "Detected FSC objects: ['none']" in msg
+
+    def test_detected_objects_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", ["suitability__c"], 2, "HIGH", ["factor"])
+        assert "suitability__c" in msg
+
+    def test_risk_level_shown(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], 3, "HIGH", ["bulk factor"])
+        assert "Bulk risk level: HIGH" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", "LOW", [], 0, "LOW", ["no risk"])
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "bulk_risk_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_bulk_risk_concern_enum_has_four_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["bulk_risk_concern"]["enum"] == ["none", "low", "medium", "high"]

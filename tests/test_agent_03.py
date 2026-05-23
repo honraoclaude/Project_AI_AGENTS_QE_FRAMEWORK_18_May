@@ -10,7 +10,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_03_fca_classifier import _resolve_ensemble, run
+from src.agents.refinement.agent_03_fca_classifier import (
+    _build_user_message,
+    _pick_primary_call,
+    _resolve_ensemble,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
+    run,
+)
 from src.core.schemas import initial_story_state
 
 
@@ -114,6 +121,29 @@ MOCK_LOW = {
     "enhanced_testing_required": False,
 }
 
+MOCK_UNCLASSIFIED = {
+    **MOCK_LOW,
+    "fca_classification": "UNCLASSIFIED",
+    "classification_rationale": "Insufficient context — description too sparse to classify.",
+    "fca_triggers": [],
+    "regulatory_obligations": [],
+    "co_signoff_required": False,
+    "enhanced_testing_required": False,
+}
+
+STORY_SPARSE = {
+    "story_id": "FSC-9999",
+    "summary": "Do the thing",
+    "description": "Update it.",  # < 15 meaningful words → UNCLASSIFIED
+    "status": "In Progress",
+    "issue_type": "Story",
+    "priority": "Low",
+    "labels": [],
+    "components": [],
+    "assignee": None,
+    "reporter": None,
+}
+
 AGENT1_DATA_SUITABILITY = {
     "goal": "Enable advisers to record COBS 9.2 Suitability Assessments.",
     "persona": "Wealth Adviser",
@@ -194,6 +224,42 @@ class TestEnsembleResolution:
         assert "call_a" in signals
         assert "call_b" in signals
         assert "tier_gap" in signals
+
+    # C3 — UNCLASSIFIED agreement → confidence=55 (never hit by existing fixtures)
+    def test_both_unclassified_returns_confidence_55(self):
+        classification, confidence, signals = _resolve_ensemble(MOCK_UNCLASSIFIED, MOCK_UNCLASSIFIED)
+        assert classification == "UNCLASSIFIED"
+        assert confidence == 55
+        assert signals["ensemble_agreement"] is True
+
+    # C4 — tier_gap=3 → confidence=30 (HIGH vs UNCLASSIFIED; only gap 1 and 2 were tested)
+    def test_high_vs_unclassified_three_tier_gap_confidence_30(self):
+        classification, confidence, signals = _resolve_ensemble(MOCK_HIGH, MOCK_UNCLASSIFIED)
+        assert confidence == 30
+        assert signals["tier_gap"] == 3
+        assert classification == "HIGH"
+
+    # C5 — conservative_winner in signals never verified
+    def test_conservative_winner_in_signals_on_disagreement(self):
+        _, _, signals = _resolve_ensemble(MOCK_HIGH, MOCK_MEDIUM)
+        assert signals["conservative_winner"] == "HIGH"
+
+    # H1 — _pick_primary_call never tested directly
+    def test_pick_primary_call_returns_call_a_when_a_matches(self):
+        result = _pick_primary_call(MOCK_HIGH, MOCK_MEDIUM, "HIGH")
+        assert result is MOCK_HIGH
+
+    def test_pick_primary_call_returns_call_b_when_b_matches(self):
+        result = _pick_primary_call(MOCK_MEDIUM, MOCK_HIGH, "HIGH")
+        assert result is MOCK_HIGH
+
+    # M1 — MEDIUM vs LOW disagreement: both confs ≥ 60 → TA position OK_OK despite disagreement
+    def test_medium_vs_low_disagreement_ta_position_ok_ok(self):
+        # MEDIUM conf=80, LOW conf=78 — both ≥ threshold(60) → OK_OK / COLLABORATE
+        _, _, signals = _resolve_ensemble(MOCK_MEDIUM, MOCK_LOW)
+        assert signals["ta_position"] == "OK_OK"
+        assert signals["interaction_mode"] == "COLLABORATE"
+        assert signals["ensemble_agreement"] is False  # still a disagreement
 
 
 # ── Integration tests — full agent run with mocked LLM and Jira ───────────────
@@ -391,6 +457,115 @@ class TestAgentRun:
         assert len(result.data["fca_triggers"]) > 0
         assert "Suitability__c" in result.data["fca_triggers"]
 
+    # H — data dict keys/values never tested
+
+    async def test_classification_rationale_in_data(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            ml.return_value = MOCK_HIGH
+            result = await run(state)
+        assert isinstance(result.data["classification_rationale"], str)
+        assert len(result.data["classification_rationale"]) > 0
+
+    async def test_regulatory_obligations_in_data(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            ml.return_value = MOCK_HIGH
+            result = await run(state)
+        assert isinstance(result.data["regulatory_obligations"], list)
+        assert len(result.data["regulatory_obligations"]) >= 1  # HIGH always has obligations
+
+    async def test_tier_gap_zero_on_agreement(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            ml.return_value = MOCK_HIGH
+            result = await run(state)
+        assert result.data["tier_gap"] == 0
+
+    async def test_tier_gap_one_on_high_medium_disagreement(self):
+        state = initial_story_state("FSC-2417")
+        call_count = 0
+
+        async def alternating(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return MOCK_HIGH if call_count % 2 == 1 else MOCK_MEDIUM
+
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", side_effect=alternating),
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            result = await run(state)
+        assert result.data["tier_gap"] == 1
+
+    async def test_call_a_and_call_b_values_in_data(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            ml.return_value = MOCK_HIGH
+            result = await run(state)
+        assert result.data["call_a_classification"] == "HIGH"
+        assert result.data["call_b_classification"] == "HIGH"
+
+    async def test_unclassified_agreement_co_false_enhanced_false_escalated(self):
+        """Both calls returning UNCLASSIFIED → confidence=55 < 60 → escalated=True."""
+        state = initial_story_state("FSC-9999")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SPARSE
+            ma.return_value = []
+            ml.return_value = MOCK_UNCLASSIFIED
+            result = await run(state)
+        assert result.data["fca_classification"] == "UNCLASSIFIED"
+        assert result.data["co_signoff_required"] is False
+        assert result.data["enhanced_testing_required"] is False
+        assert result.confidence.final_score == 55
+        assert result.confidence.escalated is True
+
+    # M2 — what string content never tested
+    async def test_what_string_contains_story_id_and_classification(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_03_fca_classifier.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_03_fca_classifier.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_03_fca_classifier.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES
+            ml.return_value = MOCK_HIGH
+            result = await run(state)
+        assert "FSC-2417" in result.what
+        assert "HIGH" in result.what
+
 
 # ── Transactional Analysis integration tests ──────────────────────────────────
 
@@ -468,3 +643,106 @@ class TestTAPosition:
 
         assert result.data["ta_position"] != "OK_OK"
         assert result.data["ensemble_agreement"] is False
+
+
+# ── Prompt content tests ──────────────────────────────────────────────────────
+
+class TestPromptContent:
+    """
+    Tests that _build_user_message() produces the prompt both Sonnet calls receive.
+    Agent 3 prompt: STORY ID, SUMMARY, COMPONENTS, DESCRIPTION only (no STATUS/PRIORITY).
+    Agent 1 section: FSC Objects, Flags, Story Summary only (no goal/persona).
+    Final instruction ends with 'classification.' not 'tool.'.
+    """
+
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_summary(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert STORY_SUITABILITY["summary"] in msg
+
+    def test_prompt_includes_components(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert "COMPONENTS:" in msg
+        assert "Suitability" in msg  # from STORY_SUITABILITY["components"]
+
+    def test_prompt_empty_components_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None)
+        assert "COMPONENTS: None" in msg
+
+    def test_prompt_shows_empty_when_description_is_none(self):
+        story = {**STORY_LABEL_CHANGE, "description": None}
+        msg = _build_user_message(story, [], None)
+        assert "(empty)" in msg
+
+    def test_prompt_ac_present_shows_scenario_structure(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert "ACCEPTANCE CRITERIA:" in msg
+        assert "Scenario" in msg
+        assert "Given" in msg
+        assert "Then" in msg
+
+    def test_prompt_ac_absent_shows_none_provided(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None)
+        assert "None provided." in msg
+
+    def test_prompt_includes_agent1_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert "AGENT 1 PRE-ANALYSIS" in msg
+        # Agent 3 section includes FSC Objects and Story Summary
+        assert "Suitability__c" in msg  # from fsc_objects
+        assert AGENT1_DATA_SUITABILITY["story_summary"] in msg
+
+    def test_prompt_agent1_section_absent_when_no_agent1_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, None)
+        assert "AGENT 1 PRE-ANALYSIS" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        # If tool instruction is missing, call_with_tool() will raise RuntimeError.
+        # Agent 3's instruction ends with "classification." (not "tool.")
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES, AGENT1_DATA_SUITABILITY)
+        assert _TOOL_NAME in msg  # "classify_fca_risk" must appear
+        assert msg.strip().endswith("classification.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    """
+    Tests that _TOOL_SCHEMA enforces the correct structure for both ensemble calls.
+    Both _INSTRUCTIONS_CAUTIOUS and _INSTRUCTIONS_EVIDENCE_BASED use the same schema.
+    """
+
+    def test_all_six_fields_are_required(self):
+        required = set(_TOOL_SCHEMA["required"])
+        expected = {
+            "fca_classification", "classification_rationale",
+            "fca_triggers", "regulatory_obligations",
+            "co_signoff_required", "enhanced_testing_required",
+        }
+        assert required == expected, f"Required fields mismatch: {required ^ expected}"
+
+    def test_fca_classification_is_enum_with_four_values(self):
+        enum = set(_TOOL_SCHEMA["properties"]["fca_classification"]["enum"])
+        assert enum == {"HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"}
+
+    def test_classification_rationale_is_string(self):
+        assert _TOOL_SCHEMA["properties"]["classification_rationale"]["type"] == "string"
+
+    def test_fca_triggers_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["fca_triggers"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_regulatory_obligations_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["regulatory_obligations"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_co_signoff_required_is_boolean(self):
+        assert _TOOL_SCHEMA["properties"]["co_signoff_required"]["type"] == "boolean"
+
+    def test_enhanced_testing_required_is_boolean(self):
+        assert _TOOL_SCHEMA["properties"]["enhanced_testing_required"]["type"] == "boolean"

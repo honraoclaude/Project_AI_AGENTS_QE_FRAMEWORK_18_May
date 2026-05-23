@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_30_fca_scenario_agent import (
+    _build_prompt,
     _compute_confidence,
+    _FCA_TOOL_NAME,
+    _FCA_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -133,6 +136,44 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence(None, None, None, 0, "LOW", False, "FAIL")
         assert score >= 20
 
+    def test_fca_classification_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", True, "PASS")
+        assert "fca_classification_available" in signals
+
+    def test_no_fca_classification_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", True, "PASS")
+        assert "no_fca_classification" in signals
+
+    def test_consumer_duty_assessment_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", True, "PASS")
+        assert "consumer_duty_assessment_available" in signals
+
+    def test_risk_anticipation_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", True, "PASS")
+        assert "risk_anticipation_available" in signals
+
+    def test_fca_scenarios_generated_stores_count(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", True, "PASS")
+        assert signals["fca_scenarios_generated"] == 2
+
+    def test_no_fca_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 0, "HIGH", True, "PASS")
+        assert "no_fca_scenarios" in signals
+
+    def test_regulated_story_consumer_duty_not_covered_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 2, "HIGH", False, "PASS")
+        assert "regulated_story_consumer_duty_not_covered" in signals
+
+    def test_medium_fca_consumer_duty_not_covered_penalised(self):
+        score_covered, _ = _compute_confidence(AGENT3_MEDIUM, AGENT4_HIGH, AGENT9_HIGH, 2, "MEDIUM", True, "PASS")
+        score_not_covered, signals = _compute_confidence(AGENT3_MEDIUM, AGENT4_HIGH, AGENT9_HIGH, 2, "MEDIUM", False, "PASS")
+        assert score_covered > score_not_covered
+        assert "regulated_story_consumer_duty_not_covered" in signals
+
+    def test_fca_scenario_fail_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT4_HIGH, AGENT9_HIGH, 0, "HIGH", False, "FAIL")
+        assert "fca_scenario_fail" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -225,6 +266,68 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=70, no_fca_classification→-10, no_fca_scenarios→-10, fca_scenario_fail→-8 = 42 < 60
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_FCA_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_medium_fca_consumer_duty_penalty_in_signals(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_MEDIUM}
+
+        with (
+            patch("src.agents.testing.agent_30_fca_scenario_agent.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.testing.agent_30_fca_scenario_agent.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = {**MOCK_FCA_PASS, "consumer_duty_covered": False}
+            result = await run(state)
+
+        assert "regulated_story_consumer_duty_not_covered" in result.data["signals"]
 
 
 # ── Ensemble and TA integration tests ────────────────────────────────────────
@@ -403,3 +506,81 @@ class TestVulnerableCustomerImpactREQ21:
 
         first_call_msg = mock_sonnet.call_args_list[0].kwargs.get("user_message", "")
         assert "FALSE" in first_call_msg or "Vulnerable Customer Impact: FALSE" in first_call_msg
+
+
+# ── Prompt builder unit tests ─────────────────────────────────────────────────
+
+_EXISTING_SCENARIO = {"title": "Suitability fails for HIGH-risk client"}
+
+
+class TestBuildPrompt:
+    def test_includes_story_id(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [])
+        assert "FSC-2417" in prompt
+
+    def test_includes_fca_class(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [])
+        assert "FCA Classification: HIGH" in prompt
+
+    def test_includes_consumer_duty_risk(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "LOW", "HIGH", "LOW", [])
+        assert "Consumer Duty risk: HIGH" in prompt
+
+    def test_includes_risk_level(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "CRITICAL", [])
+        assert "Risk anticipation level: CRITICAL" in prompt
+
+    def test_vc_impact_true_shows_mandatory(self):
+        prompt = _build_prompt(
+            "FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [],
+            vulnerable_customer_impact=True,
+        )
+        assert "TRUE" in prompt
+        assert "FG21/1 scenario is mandatory" in prompt
+
+    def test_vc_impact_false_shows_false(self):
+        prompt = _build_prompt(
+            "FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [],
+            vulnerable_customer_impact=False,
+        )
+        assert "Vulnerable Customer Impact: FALSE" in prompt
+
+    def test_existing_titles_shown(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [_EXISTING_SCENARIO])
+        assert "Suitability fails for HIGH-risk client" in prompt
+
+    def test_no_existing_scenarios_shows_none(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [])
+        assert "  none" in prompt
+
+    def test_ends_with_tool_name(self):
+        prompt = _build_prompt("FSC-2417", MOCK_STORY, "HIGH", "HIGH", "HIGH", [])
+        assert _FCA_TOOL_NAME in prompt
+        assert prompt.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_five_required_fields(self):
+        assert set(_FCA_TOOL_SCHEMA["required"]) == {
+            "fca_test_scenarios", "consumer_duty_covered",
+            "cobs_scenarios_count", "fca_scenario_verdict", "regulatory_gaps",
+        }
+
+    def test_fca_scenario_verdict_enum_has_three_values(self):
+        assert _FCA_TOOL_SCHEMA["properties"]["fca_scenario_verdict"]["enum"] == [
+            "PASS", "WARN", "FAIL",
+        ]
+
+    def test_scenario_item_has_six_required_fields(self):
+        item_required = set(
+            _FCA_TOOL_SCHEMA["properties"]["fca_test_scenarios"]["items"]["required"]
+        )
+        assert item_required == {
+            "scenario_id", "regulation", "title",
+            "description", "pass_criteria", "fail_criteria",
+        }
+
+    def test_regulatory_gaps_is_array(self):
+        assert _FCA_TOOL_SCHEMA["properties"]["regulatory_gaps"]["type"] == "array"

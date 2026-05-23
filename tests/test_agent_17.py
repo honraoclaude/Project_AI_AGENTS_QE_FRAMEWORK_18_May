@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.development.agent_17_sfdx_validator import (
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     _validate_sfdx_format,
     run,
 )
@@ -31,6 +34,18 @@ LEGACY_FILES = [
 
 UNKNOWN_ROOT_FILES = [
     {"file_path": "some/random/path/MyClass.cls", "change_type": "modified"},
+]
+
+TWO_INVALID_FILES = [
+    {"file_path": "src/classes/OldA.cls", "change_type": "modified"},
+    {"file_path": "src/classes/OldB.cls", "change_type": "modified"},
+]
+
+FOUR_LEGACY_FILES = [
+    {"file_path": "src/classes/A.cls", "change_type": "modified"},
+    {"file_path": "src/classes/B.cls", "change_type": "modified"},
+    {"file_path": "src/objects/C.object", "change_type": "modified"},
+    {"file_path": "metadata/D.object", "change_type": "modified"},
 ]
 
 MOCK_TRACE_PASS = {
@@ -119,6 +134,13 @@ class TestSfdxFormatValidation:
         _, invalid, _, _ = _validate_sfdx_format(files)
         assert len(invalid) == 1
 
+    def test_two_invalid_gives_warn(self):
+        # len(invalid) <= 2 upper boundary — must still be WARN, not FAIL
+        _, invalid, all_valid, verdict = _validate_sfdx_format(TWO_INVALID_FILES)
+        assert verdict == "WARN"
+        assert len(invalid) == 2
+        assert all_valid is False
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -148,6 +170,23 @@ class TestConfidenceScoring:
     def test_signals_dict_not_empty(self):
         _, signals = _compute_confidence(SFDX_FILES, True, [])
         assert len(signals) >= 1
+
+    def test_files_available_for_check_stores_count(self):
+        _, signals = _compute_confidence(SFDX_FILES, True, [])
+        assert signals["files_available_for_check"] == len(SFDX_FILES)
+
+    def test_no_files_to_check_key_in_signals(self):
+        _, signals = _compute_confidence([], True, [])
+        assert "no_files_to_check" in signals
+
+    def test_all_files_sfdx_format_key_in_signals(self):
+        _, signals = _compute_confidence(SFDX_FILES, True, [])
+        assert "all_files_sfdx_format" in signals
+
+    def test_legacy_format_files_found_stores_count(self):
+        invalid = ["src/classes/A.cls", "src/classes/B.cls", "metadata/C.object"]
+        _, signals = _compute_confidence(LEGACY_FILES, False, invalid)
+        assert signals["legacy_format_files_found"] == 3
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -247,3 +286,96 @@ class TestAgentRun:
             result = await run(state)
 
         assert "migration_urgency" in result.data
+
+    async def test_escalated_when_many_invalid_files(self):
+        # 4 invalid → +8 (files) − 16 (penalty capped) = 57 < 60 → escalated
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {
+            "data": {"changed_files": FOUR_LEGACY_FILES, "changed_files_count": 4}
+        }
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {
+            "data": {"changed_files": SFDX_FILES, "changed_files_count": 2}
+        }
+
+        with patch("src.agents.development.agent_17_sfdx_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", 2, 2, [], "PASS")
+        assert "FSC-2417" in msg
+
+    def test_includes_total_count(self):
+        msg = _build_trace_message("FSC-2417", 4, 3, ["src/classes/Old.cls"], "WARN")
+        assert "Total files checked: 4" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", 2, 2, [], "PASS")
+        assert "Verdict: PASS" in msg
+
+    def test_empty_invalid_shows_none(self):
+        msg = _build_trace_message("FSC-2417", 2, 2, [], "PASS")
+        assert "Invalid files: ['none']" in msg
+
+    def test_invalid_files_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", 2, 1, ["src/classes/Old.cls"], "WARN")
+        assert "src/classes/Old.cls" in msg
+
+    def test_valid_count_shown(self):
+        msg = _build_trace_message("FSC-2417", 2, 1, ["src/classes/Old.cls"], "WARN")
+        assert "Valid SFDX format: 1" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", 0, 0, [], "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "migration_urgency"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_migration_urgency_enum_has_three_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["migration_urgency"]["enum"] == ["none", "low", "high"]

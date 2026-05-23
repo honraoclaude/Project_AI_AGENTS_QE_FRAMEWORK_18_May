@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_49_post_release_monitor import (
+    _build_trace_message,
     _check_monitoring,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -113,6 +116,18 @@ class TestConfidenceScoring:
     def test_returns_signals_dict(self):
         _, signals = _compute_confidence(AGENT46_HEALTHY, True)
         assert isinstance(signals, dict)
+
+    def test_production_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT46_HEALTHY, True)
+        assert "production_data_available" in signals
+
+    def test_no_production_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, False)
+        assert "no_production_data" in signals
+
+    def test_monitoring_active_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT46_HEALTHY, True)
+        assert "monitoring_active" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -231,3 +246,89 @@ class TestAgentRun:
             result = await run(state)
 
         assert isinstance(result.confidence.escalated, bool)
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=50, no_production_data→-10=40, active=False→no delta → 40 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_49_post_release_monitor.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_49_post_release_monitor.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_49_post_release_monitor.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_49_post_release_monitor.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, [], "NOMINAL", "MONITORING")
+        assert "FSC-2417" in msg
+
+    def test_includes_active_flag(self):
+        msg = _build_trace_message("FSC-001", False, [], "UNKNOWN", "SKIPPED")
+        assert "False" in msg
+
+    def test_includes_health_status(self):
+        msg = _build_trace_message("FSC-001", True, [], "NOMINAL", "MONITORING")
+        assert "NOMINAL" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", False, [], "UNKNOWN", "SKIPPED")
+        assert "SKIPPED" in msg
+
+    def test_alerts_sentinel_when_empty(self):
+        msg = _build_trace_message("FSC-001", True, [], "NOMINAL", "MONITORING")
+        assert "['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", True, [], "NOMINAL", "MONITORING")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "monitor_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_monitor_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["monitor_concern"]["enum"] == [
+            "none", "apex_exceptions", "governor_breach",
+            "degraded_performance", "deployment_not_done",
+        ]

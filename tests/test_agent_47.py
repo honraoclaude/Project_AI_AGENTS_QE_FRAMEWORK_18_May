@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_47_release_notes_writer import (
+    _build_notes_message,
     _compute_confidence,
+    _NOTES_TOOL_NAME,
+    _NOTES_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -84,6 +87,36 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, "FAILED")
         assert score >= 20
+
+    def test_minimal_source_data_scores_between_no_data_and_full(self):
+        score_none, _ = _compute_confidence(None, None, None, "PARTIAL")
+        score_one, _  = _compute_confidence(AGENT5_FULL, None, None, "PARTIAL")
+        score_all, _  = _compute_confidence(AGENT5_FULL, AGENT19_FULL, AGENT23_PASS, "PARTIAL")
+        assert score_none < score_one < score_all
+
+    def test_good_source_coverage_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL, AGENT19_FULL, AGENT23_PASS, "COMPLETE")
+        assert "good_source_coverage" in signals
+
+    def test_good_source_coverage_stores_count(self):
+        _, signals = _compute_confidence(AGENT5_FULL, AGENT19_FULL, AGENT23_PASS, "COMPLETE")
+        assert signals["good_source_coverage"] == 3
+
+    def test_minimal_source_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL, None, None, "PARTIAL")
+        assert "minimal_source_data" in signals
+
+    def test_no_source_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, "PARTIAL")
+        assert "no_source_data" in signals
+
+    def test_notes_complete_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL, AGENT19_FULL, AGENT23_PASS, "COMPLETE")
+        assert "notes_complete" in signals
+
+    def test_notes_failed_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, "FAILED")
+        assert "notes_failed" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -212,10 +245,49 @@ class TestAgentRun:
 
         assert result.data["release_title"] == MOCK_NOTES_COMPLETE["release_title"]
 
+    async def test_escalated_when_no_upstream_data(self):
+        # base=62, no_source_data→-12=50, PARTIAL verdict→no delta → 50 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_PARTIAL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_PARTIAL
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_PARTIAL
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_47_release_notes_writer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NOTES_PARTIAL
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
 
 # ── REQ-30: new tests ─────────────────────────────────────────────────────────
-
-from src.agents.release.agent_47_release_notes_writer import _build_notes_message
 
 AGENT5_WITH_CLAUSES = {
     "ac_count": 2,
@@ -269,3 +341,42 @@ class TestREQ30FcaClassificationInPrompt:
     def test_no_agent3_defaults_gracefully(self):
         msg = _build_notes_message("FSC-001", None, None, None, None, None)
         assert "FSC-001" in msg
+
+
+# ── Build notes message unit tests ────────────────────────────────────────────
+
+class TestBuildNotesMessage:
+    def test_includes_story_id(self):
+        msg = _build_notes_message("FSC-2417", None, None, None, None, None)
+        assert "FSC-2417" in msg
+
+    def test_dev_verdict_in_prompt(self):
+        msg = _build_notes_message("FSC-001", None, None, None, AGENT23_PASS, None)
+        assert "PASS" in msg
+
+    def test_coverage_pct_in_prompt(self):
+        msg = _build_notes_message("FSC-001", None, None, None, None, AGENT33_PASS)
+        assert "92.0" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_notes_message("FSC-001", None, None, None, None, None)
+        assert _NOTES_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_five_required_fields(self):
+        assert set(_NOTES_TOOL_SCHEMA["required"]) == {
+            "release_title", "release_notes", "regulatory_notes",
+            "notes_verdict", "narrative",
+        }
+
+    def test_notes_verdict_enum_has_three_values(self):
+        assert _NOTES_TOOL_SCHEMA["properties"]["notes_verdict"]["enum"] == [
+            "COMPLETE", "PARTIAL", "FAILED",
+        ]
+
+    def test_narrative_is_string(self):
+        assert _NOTES_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"

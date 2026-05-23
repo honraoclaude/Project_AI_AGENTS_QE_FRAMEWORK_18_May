@@ -11,7 +11,10 @@ import pytest
 
 from src.agents.development.agent_10_ac_compliance import (
     _analyse_ac_compliance,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -105,6 +108,24 @@ MOCK_TRACE_PASS = {
     "compliance_risk": "low",
 }
 
+AGENT3_MEDIUM = {
+    "fca_classification": "MEDIUM",
+    "ensemble_agreement": True,
+    "fca_triggers": [],
+}
+
+AGENT5_THREE_CLAUSES = {
+    "ac_clause_count": 3,
+    "generation_mode": "validated_existing",
+    "coverage_assessment": {
+        "happy_path": True,
+        "error_paths": True,
+        "edge_cases": True,
+        "regulatory": True,
+    },
+    "remaining_gaps": [],
+}
+
 MOCK_TRACE_FAIL = {
     "narrative": (
         "This HIGH-FCA story is missing a regulatory AC scenario, which is mandatory for "
@@ -175,6 +196,31 @@ class TestAcComplianceAnalysis:
         )
         assert count == 4
 
+    def test_medium_fca_missing_regulatory_gives_fail(self):
+        _, _, _, missing, verdict = _analyse_ac_compliance(
+            CURRENT_ACS_MATCHING, AGENT5_MISSING_REGULATORY, AGENT3_MEDIUM
+        )
+        assert "regulatory" in missing
+        assert verdict == "FAIL"
+
+    def test_partial_verdict_low_fca_non_critical_missing_no_delta(self):
+        # CURRENT_ACS_MATCHING(4) vs baseline(3) → delta=+1, missing=["error_paths"], LOW FCA → PARTIAL
+        _, _, delta, missing, verdict = _analyse_ac_compliance(
+            CURRENT_ACS_MATCHING, AGENT5_MISSING_ERROR_PATHS, AGENT3_LOW
+        )
+        assert delta > 0
+        assert "error_paths" in missing
+        assert verdict == "PARTIAL"
+
+    def test_pass_when_ac_count_increases_above_baseline(self):
+        # CURRENT_ACS_MATCHING(4) vs AGENT5_THREE_CLAUSES(baseline=3) → delta=+1, full coverage → PASS
+        _, _, delta, missing, verdict = _analyse_ac_compliance(
+            CURRENT_ACS_MATCHING, AGENT5_THREE_CLAUSES, AGENT3_HIGH
+        )
+        assert delta > 0
+        assert missing == []
+        assert verdict == "PASS"
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -243,6 +289,43 @@ class TestConfidenceScoring:
     def test_refinement_baseline_missing_signal_recorded(self):
         _, signals = _compute_confidence(None, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, [])
         assert "refinement_baseline_missing" in signals
+
+    def test_refinement_baseline_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, [])
+        assert "refinement_baseline_available" in signals
+
+    def test_acs_present_in_jira_stores_count(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, [])
+        assert signals["acs_present_in_jira"] == 4
+
+    def test_no_acs_in_jira_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_EMPTY, -4, [])
+        assert "no_acs_in_jira" in signals
+
+    def test_ac_count_matches_refinement_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, [])
+        assert "ac_count_matches_refinement" in signals
+
+    def test_acs_removed_stores_absolute_delta(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_REDUCED, -2, [])
+        assert signals["acs_removed_since_refinement"] == 2
+
+    def test_all_coverage_types_present_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, [])
+        assert "all_coverage_types_present" in signals
+
+    def test_missing_coverage_types_stores_count(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, ["error_paths"])
+        assert signals["missing_coverage_types"] == 1
+
+    def test_regulated_story_missing_regulatory_stores_fca_class(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_HIGH, CURRENT_ACS_MATCHING, 0, ["regulatory"])
+        assert signals["regulated_story_missing_regulatory_coverage"] == "HIGH"
+
+    def test_medium_fca_missing_regulatory_penalised(self):
+        _, signals = _compute_confidence(AGENT5_FULL_COVERAGE, AGENT3_MEDIUM, CURRENT_ACS_MATCHING, 0, ["regulatory"])
+        assert "regulated_story_missing_regulatory_coverage" in signals
+        assert signals["regulated_story_missing_regulatory_coverage"] == "MEDIUM"
 
 
 # ── Integration tests — full agent run ───────────────────────────────────────
@@ -370,3 +453,127 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_no_baseline_and_no_acs_causes_escalation(self):
+        # No agent5 (-15) + no ACs (-10): base=68-15-10=43 < 60 → escalated
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_10_ac_compliance.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_10_ac_compliance.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_10_ac_compliance.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_acs.return_value = CURRENT_ACS_EMPTY
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": AGENT5_FULL_COVERAGE}
+
+        with (
+            patch("src.agents.development.agent_10_ac_compliance.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_10_ac_compliance.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_10_ac_compliance.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_acs.return_value = CURRENT_ACS_MATCHING
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_10_ac_compliance.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_10_ac_compliance.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_10_ac_compliance.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_acs.return_value = CURRENT_ACS_MATCHING
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_10_ac_compliance.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_10_ac_compliance.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_10_ac_compliance.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_acs.return_value = CURRENT_ACS_MATCHING
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message tests ───────────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "HIGH" in msg
+
+    def test_includes_ac_count(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "4" in msg
+
+    def test_includes_refinement_count(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "Agent 5" in msg
+
+    def test_ac_delta_formatted_with_sign(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "+0" in msg
+
+    def test_missing_coverage_shows_types_when_present(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 3, 4, -1, ["error_paths"], "FAIL", "HIGH")
+        assert "error_paths" in msg
+
+    def test_missing_coverage_shows_none_when_empty(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert "['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message(STORY_SUITABILITY, 4, 4, 0, [], "PASS", "HIGH")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "compliance_risk"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_compliance_risk_enum_has_three_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["compliance_risk"]["enum"] == ["low", "medium", "high"]

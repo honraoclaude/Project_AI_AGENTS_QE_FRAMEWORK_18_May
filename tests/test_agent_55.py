@@ -126,11 +126,9 @@ MOCK_AMIGOS_READY = {
         {"actor": "QA", "action": "Write FCA COBS 9 suitability scenario in Gherkin", "priority": "MUST"},
         {"actor": "PO", "action": "Define SLA for suitability score refresh cadence", "priority": "SHOULD"},
     ],
-    "regression_impact_assessment": {
-        "affected_areas": ["Suitability__c records", "FinancialAccount__c views", "Client 360 page layout"],
-        "regression_risk_level": "MEDIUM",
-        "regression_notes": "Changes to suitability score display may affect existing Client 360 dashboards. Recommend running regression suite on Financial Planning and Client Profile modules.",
-    },
+    "regression_affected_areas": ["Suitability__c records", "FinancialAccount__c views", "Client 360 page layout"],
+    "regression_risk_level": "MEDIUM",
+    "regression_notes": "Changes to suitability score display may affect existing Client 360 dashboards. Recommend running regression suite on Financial Planning and Client Profile modules.",
 }
 
 MOCK_AMIGOS_NEEDS_DISCUSSION = {
@@ -160,11 +158,9 @@ MOCK_AMIGOS_NEEDS_DISCUSSION = {
         {"actor": "QA", "action": "Write Vulnerable Customer scenario before sprint start", "priority": "MUST"},
         {"actor": "PO", "action": "Confirm ownership of suitability calculation service", "priority": "MUST"},
     ],
-    "regression_impact_assessment": {
-        "affected_areas": ["Financial Planning module", "Client 360 suitability widget", "Suitability__c trigger chain"],
-        "regression_risk_level": "HIGH",
-        "regression_notes": "Bulk data changes to Suitability__c may affect the Financial Planning module and existing suitability trigger automations. Run the full Financial Planning regression suite before release.",
-    },
+    "regression_affected_areas": ["Financial Planning module", "Client 360 suitability widget", "Suitability__c trigger chain"],
+    "regression_risk_level": "HIGH",
+    "regression_notes": "Bulk data changes to Suitability__c may affect the Financial Planning module and existing suitability trigger automations. Run the full Financial Planning regression suite before release.",
 }
 
 MOCK_AMIGOS_BLOCKED = {
@@ -188,11 +184,9 @@ MOCK_AMIGOS_BLOCKED = {
         {"actor": "PO", "action": "Reprioritise story — cannot enter sprint until ACs defined", "priority": "MUST"},
         {"actor": "QA", "action": "Review rewritten ACs for testability before re-refinement", "priority": "MUST"},
     ],
-    "regression_impact_assessment": {
-        "affected_areas": ["Unknown — story scope undefined"],
-        "regression_risk_level": "HIGH",
-        "regression_notes": "Regression impact cannot be assessed until story scope and ACs are defined. Do not proceed to sprint without a full regression impact review.",
-    },
+    "regression_affected_areas": ["Unknown — story scope undefined"],
+    "regression_risk_level": "HIGH",
+    "regression_notes": "Regression impact cannot be assessed until story scope and ACs are defined. Do not proceed to sprint without a full regression impact review.",
 }
 
 MOCK_AMIGOS_NO_ACS = {
@@ -233,11 +227,9 @@ MOCK_AMIGOS_NO_ACS = {
         {"actor": "DEV", "action": "Identify FSC object access requirements once ACs are defined", "priority": "MUST"},
         {"actor": "PO", "action": "Sign off on agreed ACs before story enters sprint", "priority": "MUST"},
     ],
-    "regression_impact_assessment": {
-        "affected_areas": ["Suitability__c", "FinancialAccount__c", "Client 360 page"],
-        "regression_risk_level": "HIGH",
-        "regression_notes": "Story touches shared FSC objects used across Financial Planning. Full regression assessment required once ACs and scope are confirmed.",
-    },
+    "regression_affected_areas": ["Suitability__c", "FinancialAccount__c", "Client 360 page"],
+    "regression_risk_level": "HIGH",
+    "regression_notes": "Story touches shared FSC objects used across Financial Planning. Full regression assessment required once ACs and scope are confirmed.",
 }
 
 
@@ -352,7 +344,7 @@ class TestBuildAmigosMessage:
         msg = self._build()
         assert "definition_of_done" in msg
         assert "action_items" in msg
-        assert "regression_impact_assessment" in msg
+        assert "regression_affected_areas" in msg
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -386,7 +378,8 @@ class TestAgentRun:
             "tester_discussion_points", "open_questions",
             "recommended_decisions", "story_ready_assessment",
             "facilitator_summary", "definition_of_done",
-            "action_items", "regression_impact_assessment",
+            "action_items",
+            "regression_affected_areas", "regression_risk_level", "regression_notes",
         ]:
             assert key in result.data, f"Missing key: {key}"
 
@@ -589,28 +582,24 @@ class TestRegressionImpactAssessment:
             mock_sonnet.return_value = mock_data
             return await run(state)
 
-    async def test_regression_assessment_present_in_data(self):
+    async def test_regression_flat_fields_present_in_data(self):
         result = await self._run_with(MOCK_AMIGOS_READY)
-        assert "regression_impact_assessment" in result.data
+        for key in ("regression_affected_areas", "regression_risk_level", "regression_notes"):
+            assert key in result.data, f"Missing flat regression key: {key}"
 
-    async def test_regression_assessment_has_affected_areas(self):
+    async def test_regression_affected_areas_is_list(self):
         result = await self._run_with(MOCK_AMIGOS_READY)
-        reg = result.data["regression_impact_assessment"]
-        assert "affected_areas" in reg
-        assert isinstance(reg["affected_areas"], list)
+        assert isinstance(result.data["regression_affected_areas"], list)
 
-    async def test_regression_assessment_has_risk_level(self):
+    async def test_regression_risk_level_is_valid_enum(self):
         result = await self._run_with(MOCK_AMIGOS_READY)
-        reg = result.data["regression_impact_assessment"]
-        assert "regression_risk_level" in reg
-        assert reg["regression_risk_level"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+        assert result.data["regression_risk_level"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 
-    async def test_regression_assessment_has_notes(self):
+    async def test_regression_notes_is_non_empty_string(self):
         result = await self._run_with(MOCK_AMIGOS_READY)
-        reg = result.data["regression_impact_assessment"]
-        assert "regression_notes" in reg
-        assert isinstance(reg["regression_notes"], str)
-        assert len(reg["regression_notes"]) > 0
+        notes = result.data["regression_notes"]
+        assert isinstance(notes, str)
+        assert len(notes) > 0
 
     async def test_high_dependency_depth_produces_high_or_critical_risk(self):
         state = initial_story_state("FSC-2417")
@@ -619,18 +608,15 @@ class TestRegressionImpactAssessment:
                    new_callable=AsyncMock) as mock_sonnet:
             mock_sonnet.return_value = MOCK_AMIGOS_NEEDS_DISCUSSION
             result = await run(state)
-        reg = result.data["regression_impact_assessment"]
-        assert reg["regression_risk_level"] in ("HIGH", "CRITICAL")
+        assert result.data["regression_risk_level"] in ("HIGH", "CRITICAL")
 
     async def test_affected_areas_non_empty(self):
         result = await self._run_with(MOCK_AMIGOS_NEEDS_DISCUSSION)
-        reg = result.data["regression_impact_assessment"]
-        assert len(reg["affected_areas"]) > 0
+        assert len(result.data["regression_affected_areas"]) > 0
 
     async def test_blocked_story_regression_notes_present(self):
         result = await self._run_with(MOCK_AMIGOS_BLOCKED)
-        reg = result.data["regression_impact_assessment"]
-        assert len(reg["regression_notes"]) > 10  # meaningful narrative, not empty string
+        assert len(result.data["regression_notes"]) > 10  # meaningful narrative, not empty string
 
 
 # ── Retry behaviour tests ─────────────────────────────────────────────────────
@@ -701,16 +687,24 @@ class TestSchemaContract:
                 f"'{field}' must have minItems=1 to prevent empty array responses"
             )
 
-    def test_affected_areas_has_min_items(self):
+    def test_regression_affected_areas_has_min_items(self):
         from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
 
-        affected_areas = (
-            _AMIGOS_TOOL_SCHEMA["properties"]["regression_impact_assessment"]
-            ["properties"]["affected_areas"]
+        props = _AMIGOS_TOOL_SCHEMA["properties"]
+        assert props["regression_affected_areas"].get("minItems") == 1, (
+            "'regression_affected_areas' must have minItems=1 (flat field, not nested)"
         )
-        assert affected_areas.get("minItems") == 1
 
-    def test_all_ten_fields_in_required(self):
+    def test_regression_impact_assessment_not_nested(self):
+        from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
+
+        props = _AMIGOS_TOOL_SCHEMA["properties"]
+        assert "regression_impact_assessment" not in props, (
+            "regression_impact_assessment must be flattened — "
+            "use regression_affected_areas, regression_risk_level, regression_notes instead"
+        )
+
+    def test_all_twelve_fields_in_required(self):
         from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
 
         expected = {
@@ -718,6 +712,7 @@ class TestSchemaContract:
             "tester_discussion_points", "open_questions",
             "recommended_decisions", "story_ready_assessment",
             "facilitator_summary", "definition_of_done",
-            "action_items", "regression_impact_assessment",
+            "action_items",
+            "regression_affected_areas", "regression_risk_level", "regression_notes",
         }
         assert set(_AMIGOS_TOOL_SCHEMA["required"]) == expected

@@ -31,7 +31,11 @@ from __future__ import annotations
 import asyncio
 
 from src.core.schemas import StoryState
-from src.fleet_commander.phases._helpers import _get_agent_data, _merge_results
+from src.fleet_commander.phases._helpers import (
+    _collect_escalated_agents,
+    _get_agent_data,
+    _merge_results,
+)
 
 
 # ── Gate definitions ──────────────────────────────────────────────────────────
@@ -48,8 +52,19 @@ def _check_gate_g5(state: StoryState) -> None:
     """
     Gate G5 — Test Quality.
     Blocks if: coverage below FCA threshold, critical defects found, or CRT execution skipped.
+    Advisory (non-blocking): regression_verdict=FAIL from Agent 32.
     """
     failures: list[str] = []
+
+    # Advisory: HIGH regression risk — non-blocking but surfaced in phase_errors
+    reg_data = _get_agent_data(state, "32")
+    reg_verdict = (reg_data or {}).get("regression_verdict", "")
+    if reg_verdict == "FAIL":
+        suite = (reg_data or {}).get("recommended_regression_suite", "FULL")
+        state["phase_errors"].append(
+            f"Gate G5 advisory — Regression Risk (Agent 32): HIGH regression risk detected; "
+            f"recommended suite={suite}. Run full regression before promoting to Release."
+        )
 
     # REQ-18: CRT execution SKIPPED → no automated tests ran
     crt_data = _get_agent_data(state, "27")
@@ -174,6 +189,11 @@ async def run_testing_phase(state: StoryState) -> StoryState:
         return_exceptions=True,
     )
     state = _merge_results(state, [33, 34, 38], batch4_results)
+
+    # ── F2: Surface escalated agents in phase_errors (non-blocking) ───────────
+    testing_agents = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 37, 38]
+    escalated = _collect_escalated_agents(state, testing_agents)
+    state["phase_errors"].extend(escalated)
 
     # ── Gate G5: Test Quality ─────────────────────────────────────────────────
     _check_gate_g5(state)

@@ -9,7 +9,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_01_story_intent import run, _compute_confidence
+from src.agents.refinement.agent_01_story_intent import (
+    run,
+    _compute_confidence,
+    _build_user_message,
+    _TOOL_SCHEMA,
+    _TOOL_NAME,
+)
 from src.core.schemas import initial_story_state
 
 
@@ -209,3 +215,290 @@ class TestAgentRun:
             result = await run(state)
 
         assert "high_fca_object_detected" in result.data.get("flags", [])
+
+
+# ── Helpers for functional tests ──────────────────────────────────────────────
+
+def _story(description: str = "", summary: str = "No summary") -> dict:
+    """Minimal story dict — only description and summary affect confidence scoring."""
+    return {
+        "story_id": "TST-001",
+        "summary": summary,
+        "description": description,
+        "status": "Sprint Ready",
+        "issue_type": "Story",
+        "priority": "Medium",
+        "labels": [],
+        "components": [],
+        "assignee": None,
+        "reporter": None,
+    }
+
+
+def _extraction(
+    *,
+    fsc_objects: list | None = None,
+    persona: str = "UNKNOWN",
+    flags: list | None = None,
+    ac_complete: bool = False,
+) -> dict:
+    """Minimal extraction dict — caller controls exactly which signals fire."""
+    return {
+        "goal": "Test goal",
+        "persona": persona,
+        "fsc_objects": fsc_objects if fsc_objects is not None else [],
+        "fsc_components": [],
+        "ac_present": ac_complete,
+        "ac_complete": ac_complete,
+        "missing_elements": ["none"],
+        "story_summary": "Test summary.",
+        "flags": flags if flags is not None else [],
+    }
+
+
+# ── Signal isolation tests ────────────────────────────────────────────────────
+
+class TestConfidenceSignals:
+    """
+    Each test isolates one scoring rule by holding all other inputs constant
+    and diffing two states. The diff reveals the exact adjustment applied.
+
+    Scoring rules under test (from _compute_confidence):
+      description_words : >=150→+15, >=50→+8, >=20→+2, else→-20
+      ac_complete       : clauses + complete=True → +15
+      ac_incomplete     : clauses + complete=False → +7
+      ac_absent         : no clauses → -10
+      fsc_objects_count : >=2→+10, ==1→+5
+      no_fsc_objects    : empty list → -5
+      persona_identified: persona != UNKNOWN → +5
+      high_fca_keyword  : FCA keyword in description or summary → +5
+      vague_goal_flag   : "vague_goal" in flags → -10
+    """
+
+    def test_150_word_description_adds_7_more_than_50_word(self):
+        # >=150 → +15; >=50 → +8; diff must be exactly 7
+        long_desc  = "word " * 150
+        short_desc = "word " * 50
+        ext = _extraction()
+        score_long,  _ = _compute_confidence(_story(long_desc),  [], ext)
+        score_short, _ = _compute_confidence(_story(short_desc), [], ext)
+        assert score_long - score_short == 7
+
+    def test_50_word_description_adds_6_more_than_20_word(self):
+        # >=50 → +8; >=20 → +2; diff = 6
+        mid_desc = "word " * 50
+        low_desc = "word " * 20
+        ext = _extraction()
+        score_mid, _ = _compute_confidence(_story(mid_desc), [], ext)
+        score_low, _ = _compute_confidence(_story(low_desc), [], ext)
+        assert score_mid - score_low == 6
+
+    def test_20_word_description_adds_22_more_than_19_word(self):
+        # >=20 → +2; <20 → -20; diff = 22 — the largest single boundary jump
+        above = "word " * 20
+        below = "word " * 19
+        ext = _extraction()
+        score_above, _ = _compute_confidence(_story(above), [], ext)
+        score_below, _ = _compute_confidence(_story(below), [], ext)
+        assert score_above - score_below == 22
+
+    def test_complete_acs_add_25_more_than_absent(self):
+        # complete ACs → +15; no ACs → -10; diff = 25
+        desc = "word " * 50
+        score_complete, _ = _compute_confidence(_story(desc), AC_CLAUSES_FULL, _extraction(ac_complete=True))
+        score_absent,   _ = _compute_confidence(_story(desc), [],              _extraction(ac_complete=False))
+        assert score_complete - score_absent == 25
+
+    def test_incomplete_acs_add_17_more_than_absent(self):
+        # clauses present but incomplete → +7; no ACs → -10; diff = 17
+        desc = "word " * 50
+        score_incomplete, _ = _compute_confidence(_story(desc), AC_CLAUSES_FULL, _extraction(ac_complete=False))
+        score_absent,     _ = _compute_confidence(_story(desc), [],              _extraction(ac_complete=False))
+        assert score_incomplete - score_absent == 17
+
+    def test_complete_acs_add_8_more_than_incomplete(self):
+        # complete → +15; incomplete → +7; diff = 8
+        desc = "word " * 50
+        score_complete,   _ = _compute_confidence(_story(desc), AC_CLAUSES_FULL, _extraction(ac_complete=True))
+        score_incomplete, _ = _compute_confidence(_story(desc), AC_CLAUSES_FULL, _extraction(ac_complete=False))
+        assert score_complete - score_incomplete == 8
+
+    def test_two_fsc_objects_add_5_more_than_one(self):
+        # >=2 → +10; ==1 → +5; diff = 5
+        desc = "word " * 50
+        score_two, _ = _compute_confidence(_story(desc), [], _extraction(fsc_objects=["A", "B"]))
+        score_one, _ = _compute_confidence(_story(desc), [], _extraction(fsc_objects=["A"]))
+        assert score_two - score_one == 5
+
+    def test_one_fsc_object_adds_10_more_than_zero(self):
+        # ==1 → +5; ==0 → no fsc_objects_count signal BUT no_fsc_objects fires (-5); diff = 10
+        desc = "word " * 50
+        score_one,  _ = _compute_confidence(_story(desc), [], _extraction(fsc_objects=["A"]))
+        score_zero, _ = _compute_confidence(_story(desc), [], _extraction(fsc_objects=[]))
+        assert score_one - score_zero == 10
+
+    def test_known_persona_adds_5_points(self):
+        desc = "word " * 50
+        score_known,   _ = _compute_confidence(_story(desc), [], _extraction(persona="Wealth Adviser"))
+        score_unknown, _ = _compute_confidence(_story(desc), [], _extraction(persona="UNKNOWN"))
+        assert score_known - score_unknown == 5
+
+    def test_vague_goal_flag_deducts_10_points(self):
+        desc = "word " * 50
+        score_clean, _ = _compute_confidence(_story(desc), [], _extraction(flags=[]))
+        score_vague, _ = _compute_confidence(_story(desc), [], _extraction(flags=["vague_goal"]))
+        assert score_clean - score_vague == 10
+
+    def test_high_fca_keyword_in_description_adds_5_points(self):
+        # "suitability" is in _HIGH_FCA_OBJECTS
+        desc_fca    = "word " * 50 + " suitability assessment required"
+        desc_no_fca = "word " * 50
+        score_fca,    _ = _compute_confidence(_story(desc_fca),    [], _extraction())
+        score_no_fca, _ = _compute_confidence(_story(desc_no_fca), [], _extraction())
+        assert score_fca - score_no_fca == 5
+
+    def test_high_fca_keyword_in_summary_also_adds_5_points(self):
+        # keyword detection uses (description + summary).lower()
+        desc = "word " * 50
+        score_fca,    _ = _compute_confidence(_story(desc, summary="suitability review required"), [], _extraction())
+        score_no_fca, _ = _compute_confidence(_story(desc, summary="routine change"),             [], _extraction())
+        assert score_fca - score_no_fca == 5
+
+    def test_other_flag_does_not_reduce_score(self):
+        # Only "vague_goal" triggers a penalty — other flags are informational
+        desc = "word " * 50
+        score_no_flag, _ = _compute_confidence(_story(desc), [], _extraction(flags=[]))
+        score_other,   _ = _compute_confidence(_story(desc), [], _extraction(flags=["high_fca_object_detected"]))
+        assert score_no_flag == score_other
+
+
+# ── Score arithmetic tests ────────────────────────────────────────────────────
+
+class TestScoreArithmetic:
+    """
+    Tests that derive the full expected score from first principles.
+    Catches regressions where the base value or any adjustment constant changes.
+    """
+
+    def test_best_case_is_capped_at_92(self):
+        # base=55 + desc≥150(+15) + ac_complete(+15) + ≥2_fsc(+10)
+        # + persona(+5) + fca_keyword(+5) = 105 → must be capped at 92
+        desc = "word " * 150 + " suitability cobs"
+        score, _ = _compute_confidence(
+            _story(desc),
+            AC_CLAUSES_FULL,
+            _extraction(
+                fsc_objects=["Suitability__c", "RiskProfile__c"],
+                persona="Wealth Adviser",
+                ac_complete=True,
+            ),
+        )
+        assert score == 92
+
+    def test_worst_case_is_floored_at_20(self):
+        # base=55 + desc<20(-20) + ac_absent(-10) + no_fsc(-5) + vague_goal(-10) = 10 → floored at 20
+        score, _ = _compute_confidence(
+            _story("five words only here now"),   # 5 words — under 20
+            [],
+            _extraction(flags=["vague_goal"]),
+        )
+        assert score == 20
+
+    def test_midrange_story_exact_score(self):
+        # Controlled inputs with no FCA keyword, no persona, no flags.
+        # base=55 + desc≥50(+8) + ac_incomplete(+7) + 1_fsc(+5) = 75
+        desc = "word " * 50
+        score, _ = _compute_confidence(
+            _story(desc),
+            AC_CLAUSES_FULL,
+            _extraction(fsc_objects=["FinancialAccount"], persona="UNKNOWN", ac_complete=False),
+        )
+        assert score == 75
+
+    def test_no_signals_at_all_lands_at_base_plus_short_desc_penalty(self):
+        # Empty description (0 words < 20 → -20), no ACs (-10), no FSC (-5)
+        # base=55 - 20 - 10 - 5 = 20 → hits floor
+        score, _ = _compute_confidence(_story(""), [], _extraction())
+        assert score == 20
+
+    def test_signals_dict_stores_observed_values_not_adjustments(self):
+        # TierBScorer.add(name, value, delta) stores value — not delta
+        desc = "word " * 60   # 60 words — signal fires with observed value 60
+        _, signals = _compute_confidence(_story(desc), [], _extraction())
+        assert signals["description_words"] == 60   # the observed count, not the +8 adjustment
+
+
+# ── Prompt content tests ──────────────────────────────────────────────────────
+
+class TestPromptContent:
+    """
+    Tests that _build_user_message() puts the right content in the prompt.
+    These catch regressions where someone edits the message builder and drops
+    critical context — without needing a live API call.
+    """
+
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, [])
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_description_text(self):
+        msg = _build_user_message(STORY_SUITABILITY, [])
+        assert "COBS 9.2" in msg
+        assert "Suitability" in msg
+
+    def test_prompt_includes_ac_scenarios_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL)
+        assert "Scenario:" in msg
+        assert "Given" in msg
+        assert "When" in msg
+        assert "Then" in msg
+
+    def test_prompt_says_none_found_when_no_acs(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [])
+        assert "None found" in msg
+        assert "Scenario:" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        # The final line must tell the model to call the tool.
+        # If this is missing, call_with_tool() will raise RuntimeError.
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL)
+        assert _TOOL_NAME in msg   # "extract_story_intent" must appear
+        assert msg.strip().endswith("tool.")
+
+    def test_prompt_includes_components_and_labels(self):
+        msg = _build_user_message(STORY_SUITABILITY, [])
+        assert "COMPONENTS:" in msg
+        assert "LABELS:" in msg
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    """
+    Tests that _TOOL_SCHEMA enforces the correct structure.
+    Claude validates tool inputs against this schema — if a field is
+    missing or wrong-typed here, the LLM can produce malformed output
+    that downstream agents silently misread.
+    """
+
+    def test_all_nine_fields_are_required(self):
+        required = set(_TOOL_SCHEMA["required"])
+        expected = {
+            "goal", "persona", "fsc_objects", "fsc_components",
+            "ac_present", "ac_complete", "missing_elements",
+            "story_summary", "flags",
+        }
+        assert required == expected, f"Required fields mismatch: {required ^ expected}"
+
+    def test_fsc_objects_is_typed_array(self):
+        assert _TOOL_SCHEMA["properties"]["fsc_objects"]["type"] == "array"
+        assert _TOOL_SCHEMA["properties"]["fsc_objects"]["items"]["type"] == "string"
+
+    def test_boolean_fields_have_correct_type(self):
+        assert _TOOL_SCHEMA["properties"]["ac_present"]["type"] == "boolean"
+        assert _TOOL_SCHEMA["properties"]["ac_complete"]["type"] == "boolean"
+
+    def test_flags_is_typed_array_of_strings(self):
+        flags_schema = _TOOL_SCHEMA["properties"]["flags"]
+        assert flags_schema["type"] == "array"
+        assert flags_schema["items"]["type"] == "string"

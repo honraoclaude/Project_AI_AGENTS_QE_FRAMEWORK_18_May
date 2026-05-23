@@ -609,6 +609,22 @@ async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> Non
     print(f"  Outputs: {output_dir / story_id}")
     print(f"{'=' * 60}\n")
 
+    # ── Correctness assertions (Finding 7 — not just smoke-test) ─────────────
+    from validation.assertions import assert_pipeline_correctness
+    assertion_failures = assert_pipeline_correctness(results, story_id)
+    if assertion_failures:
+        print(f"  CORRECTNESS ASSERTIONS: {len(assertion_failures)} FAILED")
+        for f in assertion_failures:
+            print(
+                f"  [FAIL] Agent {f['agent_id']:02d} — {f['key']}: "
+                f"expected={f['expected']!r}, got={f['actual']!r}"
+            )
+            if f.get("note"):
+                print(f"         note: {f['note']}")
+        print()
+    else:
+        print(f"  Correctness assertions: PASS (all known-good values verified)\n")
+
     if not skip_report:
         from validation.generate_report import generate_html_report
         report_path = output_dir / f"{story_id}_report.html"

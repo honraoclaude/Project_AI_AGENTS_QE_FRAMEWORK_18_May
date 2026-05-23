@@ -51,7 +51,11 @@ from __future__ import annotations
 import asyncio
 
 from src.core.schemas import StoryState
-from src.fleet_commander.phases._helpers import _get_agent_data, _merge_results
+from src.fleet_commander.phases._helpers import (
+    _collect_escalated_agents,
+    _get_agent_data,
+    _merge_results,
+)
 
 
 # ── Gate definitions ──────────────────────────────────────────────────────────
@@ -192,10 +196,18 @@ def _check_gate_g11(state: StoryState) -> None:
 def _check_gate_g12(state: StoryState) -> None:
     """
     Gate G12 — Production Validation.
-    Informational in v1 — production health check stubs always pass after a GO decision.
+    Informational in v1 — advisory warnings written to phase_errors; no hard blocks.
     Phase 2 will enforce health checks against Salesforce Event Log Files.
     """
-    # No hard failures in v1; gate exists as an anchor for Phase 2 integration
+    rollback_data = _get_agent_data(state, "48")
+    rollback_verdict = (rollback_data or {}).get("rollback_verdict", "")
+    if rollback_verdict == "NOT_FEASIBLE":
+        steps = (rollback_data or {}).get("rollback_steps", [])
+        state["phase_errors"].append(
+            f"Gate G12 advisory — Rollback Readiness (Agent 48): NOT_FEASIBLE — "
+            f"automated rollback cannot be executed ({len(steps)} manual step(s) required). "
+            "Ensure incident-response runbook is prepared before production deployment."
+        )
 
 
 # ── Phase orchestration ───────────────────────────────────────────────────────
@@ -259,9 +271,6 @@ async def run_release_phase(state: StoryState) -> StoryState:
     result46 = await dispatch_agent(46, state)
     state["agent_results"]["46"] = result46
 
-    # ── Gate G12: Production Validation ──────────────────────────────────────
-    _check_gate_g12(state)
-
     # ── Final Batch: Rollback Readiness + Post-Release Monitor + Retrospective ─
     final_results = await asyncio.gather(
         dispatch_agent(48, state),
@@ -270,6 +279,14 @@ async def run_release_phase(state: StoryState) -> StoryState:
         return_exceptions=True,
     )
     state = _merge_results(state, [48, 49, 50], final_results)
+
+    # ── F2: Surface escalated agents in phase_errors (non-blocking) ───────────
+    release_agents = [39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
+    escalated = _collect_escalated_agents(state, release_agents)
+    state["phase_errors"].extend(escalated)
+
+    # ── Gate G12: Production Validation (runs after Agent 48 — reads rollback result) ─
+    _check_gate_g12(state)
 
     return state
 

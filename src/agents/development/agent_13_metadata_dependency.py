@@ -125,6 +125,11 @@ async def run(state: StoryState) -> AgentResult:
         "Metadata Dependency Mapper scanned changed files for FSC object dependencies.",
     )
 
+    has_destructive_changes = any(
+        f.get("change_type", "").lower() in ("delete", "deleted", "destructive", "removed")
+        for f in changed_files
+    )
+
     data = {
         "changed_files": changed_files,
         "changed_files_count": len(changed_files),
@@ -134,6 +139,7 @@ async def run(state: StoryState) -> AgentResult:
         "dependency_depth": depth,
         "scope_delta_objects": scope_delta,
         "scope_matches_refinement": scope_matches,
+        "has_destructive_changes": has_destructive_changes,
         "dependency_complexity": trace.get("dependency_complexity", "low"),
         "narrative": trace.get("narrative", ""),
         "signals": signals,

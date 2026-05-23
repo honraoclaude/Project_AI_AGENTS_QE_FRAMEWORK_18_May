@@ -175,6 +175,13 @@ async def run(state: StoryState) -> AgentResult:
     )
     why = trace.get("narrative", "Dependency mapping applied FSC object rules deterministically.")
 
+    story_text = (
+        (story.get("description") or "") + " " + (story.get("summary") or "")
+    ).lower()
+    has_destructive_changes = any(
+        kw in story_text for kw in ("delete", "remove field", "drop field", "deprecate", "destroy")
+    )
+
     data = {
         "detected_objects": detected,
         "implied_objects": implied,
@@ -183,6 +190,7 @@ async def run(state: StoryState) -> AgentResult:
         "cross_object_count": cross_object_count,
         "dependency_complexity": trace.get("dependency_complexity", "low"),
         "has_external_dependencies": has_external_deps,
+        "has_destructive_changes": has_destructive_changes,
         "detected_dependency_types": dep_types,
         "narrative": trace.get("narrative", ""),
         "signals": signals,

@@ -25,7 +25,9 @@ Output data keys consumed by downstream:
   facilitator_summary           → str         (2–3 sentences for the facilitator)
   definition_of_done            → list[str]   (specific testable DoD criteria)
   action_items                  → list[dict]  (actor/action/priority — BA/DEV/QA/PO)
-  regression_impact_assessment  → dict        (affected_areas, risk_level, notes)
+  regression_affected_areas     → list[str]   (FSC objects / features that could regress)
+  regression_risk_level         → str         (LOW / MEDIUM / HIGH / CRITICAL)
+  regression_notes              → str         (2–3 sentence mitigation recommendation)
 """
 
 from __future__ import annotations
@@ -46,7 +48,8 @@ _AMIGOS_TOOL_SCHEMA = {
         "ba_discussion_points", "developer_discussion_points",
         "tester_discussion_points", "open_questions",
         "recommended_decisions", "story_ready_assessment", "facilitator_summary",
-        "definition_of_done", "action_items", "regression_impact_assessment",
+        "definition_of_done", "action_items",
+        "regression_affected_areas", "regression_risk_level", "regression_notes",
     ],
     "properties": {
         "ba_discussion_points": {
@@ -138,30 +141,26 @@ _AMIGOS_TOOL_SCHEMA = {
                 "to at least one action item with a named actor. MUST be non-empty."
             ),
         },
-        "regression_impact_assessment": {
-            "type": "object",
-            "required": ["affected_areas", "regression_risk_level", "regression_notes"],
-            "properties": {
-                "affected_areas": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {"type": "string"},
-                    "description": "FSC objects, features, or UI pages that could regress due to this change.",
-                },
-                "regression_risk_level": {
-                    "type": "string",
-                    "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
-                    "description": (
-                        "HIGH/CRITICAL when: destructive changes present, dependency_depth >= 2, "
-                        "or story touches shared FSC objects (FinancialAccount__c, Suitability__c, FinancialHolding__c)."
-                    ),
-                },
-                "regression_notes": {
-                    "type": "string",
-                    "description": "2–3 sentences on regression risk and recommended mitigation or regression suite scope.",
-                },
-            },
-            "description": "Assessment of regression risk on existing functionality caused by this change.",
+        "regression_affected_areas": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"},
+            "description": (
+                "FSC objects, features, or UI pages that could regress due to this change. "
+                "MUST be non-empty — at minimum name the primary object touched."
+            ),
+        },
+        "regression_risk_level": {
+            "type": "string",
+            "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+            "description": (
+                "HIGH/CRITICAL when: destructive changes present, dependency_depth >= 2, "
+                "or story touches shared FSC objects (FinancialAccount__c, Suitability__c, FinancialHolding__c)."
+            ),
+        },
+        "regression_notes": {
+            "type": "string",
+            "description": "2–3 sentences on regression risk and recommended mitigation or regression suite scope.",
         },
     },
 }
@@ -204,12 +203,13 @@ Include DoD items covering:
   - No CRITICAL risks in risk register at sprint start
 Each DoD item must be measurable, not vague ("tested" is not a DoD item — name the threshold).
 
-Rule 4 — ALWAYS produce regression_impact_assessment.
+Rule 4 — ALWAYS populate regression_affected_areas, regression_risk_level, and regression_notes.
 Identify which existing FSC features and objects could regress from this change.
-Assess regression_risk_level as HIGH or CRITICAL when: destructive metadata changes are present,
+Set regression_risk_level to HIGH or CRITICAL when: destructive metadata changes are present,
 dependency_depth >= 2, or the story touches shared FSC objects used across features
 (FinancialAccount__c, Suitability__c, FinancialHolding__c, RiskProfile__c).
-Name a specific regression scope (e.g. "run Financial Planning module regression suite").
+regression_affected_areas must be non-empty — name a specific regression scope.
+regression_notes should name the recommended mitigation suite (e.g. "run Financial Planning module regression suite").
 
 story_ready_assessment rules:
 - READY: INVEST verdict = PASS AND no CRITICAL risks AND ac_count > 0.
@@ -253,7 +253,9 @@ async def run(state: StoryState) -> AgentResult:
     summary      = result_data.get("facilitator_summary", "3 Amigos session facilitation complete.")
     dod          = result_data.get("definition_of_done", [])
     action_items = result_data.get("action_items", [])
-    regression   = result_data.get("regression_impact_assessment", {})
+    reg_areas    = result_data.get("regression_affected_areas", [])
+    reg_risk     = result_data.get("regression_risk_level", "MEDIUM")
+    reg_notes    = result_data.get("regression_notes", "")
 
     confidence_score, signals = _compute_confidence(
         agent2_data, agent9_data, agent3_data, open_qs, assessment,
@@ -275,7 +277,9 @@ async def run(state: StoryState) -> AgentResult:
         "facilitator_summary": summary,
         "definition_of_done": dod,
         "action_items": action_items,
-        "regression_impact_assessment": regression,
+        "regression_affected_areas": reg_areas,
+        "regression_risk_level": reg_risk,
+        "regression_notes": reg_notes,
         "signals": signals,
     }
 
@@ -346,6 +350,7 @@ _REQUIRED_LIST_FIELDS = (
     "tester_discussion_points",
     "definition_of_done",
     "action_items",
+    "regression_affected_areas",
 )
 
 
@@ -407,7 +412,7 @@ def _build_amigos_message(
     cd_verdict      = (agent4_data or {}).get("cd_verdict", "UNKNOWN")
     cd_obligations  = (agent4_data or {}).get("cd_obligations", [])
     vc_impact       = (agent4_data or {}).get("vulnerable_customer_impact", False)
-    ac_count        = (agent5_data or {}).get("ac_count", 0)
+    ac_count        = (agent5_data or {}).get("ac_clause_count", 0)
     remaining_gaps  = (agent5_data or {}).get("remaining_gaps", [])
     cov_target      = (agent6_data or {}).get("coverage_target_pct", 0)
     test_tools      = (agent6_data or {}).get("test_tools", [])
@@ -453,7 +458,8 @@ def _build_amigos_message(
         f"Adversarial Challenger verdict: {adversarial or 'not run'}\n\n"
         f"Generate the 3 Amigos facilitation document using the {_AMIGOS_TOOL_NAME} tool.\n"
         f"REMINDER: All fields are required and must be non-empty — including "
-        f"definition_of_done, action_items (with actor assignments), and regression_impact_assessment."
+        f"definition_of_done, action_items (with actor assignments), "
+        f"and regression_affected_areas (flat field — NOT nested in regression_impact_assessment)."
     )
 
 

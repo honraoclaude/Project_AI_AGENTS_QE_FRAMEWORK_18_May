@@ -11,9 +11,12 @@ import pytest
 
 from src.agents.development.agent_13_metadata_dependency import (
     _analyse_metadata,
+    _build_trace_message,
     _compute_confidence,
     _detect_objects_from_files,
     _run_dependency_bfs,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -83,6 +86,24 @@ MOCK_TRACE = {
     "narrative": "Suitability__c and RiskProfile__c were detected in changed metadata, matching the Refinement prediction.",
     "dependency_complexity": "medium",
 }
+
+CHANGED_FILES_DESTRUCTIVE = [
+    {
+        "file_path": "force-app/main/default/classes/OldService.cls",
+        "change_type": "delete",
+        "object_type": "ApexClass",
+        "object_name": "OldService",
+    },
+]
+
+CHANGED_FILES_SINGLE_OBJECT = [
+    {
+        "file_path": "force-app/main/default/classes/SuitabilityService.cls",
+        "change_type": "modify",
+        "object_type": "ApexClass",
+        "object_name": "SuitabilityService",
+    },
+]
 
 
 # ── Object detection tests (no LLM, no network) ───────────────────────────────
@@ -232,6 +253,62 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence(CHANGED_FILES_EMPTY, [], [], 0, [], None)
         assert score >= 20
 
+    def test_changed_files_present_stores_count(self):
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c", "riskprofile__c"], ["financialaccount"], 2, [], AGENT8_DATA_SUITABILITY
+        )
+        assert signals["changed_files_present"] == len(CHANGED_FILES_SUITABILITY)
+
+    def test_no_changed_files_key_in_signals(self):
+        _, signals = _compute_confidence(CHANGED_FILES_EMPTY, [], [], 0, [], None)
+        assert "no_changed_files" in signals
+
+    def test_detected_objects_rich_stores_count(self):
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c", "riskprofile__c"], ["financialaccount"], 2, [], AGENT8_DATA_SUITABILITY
+        )
+        assert signals["detected_objects_rich"] == 2
+
+    def test_detected_objects_single_key_and_value(self):
+        _, signals = _compute_confidence(CHANGED_FILES_SINGLE_OBJECT, ["suitability__c"], [], 1, [], None)
+        assert "detected_objects_single" in signals
+        assert signals["detected_objects_single"] == 1
+
+    def test_no_fsc_objects_key_in_signals(self):
+        _, signals = _compute_confidence(CHANGED_FILES_NO_FSC, [], [], 0, [], None)
+        assert "no_fsc_objects_in_changed_files" in signals
+
+    def test_refinement_baseline_available_key_in_signals(self):
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c"], [], 1, [], AGENT8_DATA_SUITABILITY
+        )
+        assert "refinement_baseline_available" in signals
+
+    def test_scope_matches_refinement_key_in_signals(self):
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c"], [], 1, [], AGENT8_DATA_SUITABILITY
+        )
+        assert "scope_matches_refinement" in signals
+
+    def test_scope_delta_detected_stores_count(self):
+        agent8_narrow = {"detected_objects": ["suitability__c"], "implied_objects": []}
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c"], [], 1, ["extra_object__c"], agent8_narrow
+        )
+        assert "scope_delta_detected" in signals
+        assert signals["scope_delta_detected"] == 1
+
+    def test_no_refinement_baseline_key_in_signals(self):
+        _, signals = _compute_confidence(CHANGED_FILES_SUITABILITY, ["suitability__c"], [], 1, [], None)
+        assert "no_refinement_baseline" in signals
+
+    def test_deep_dependency_chain_stores_depth(self):
+        _, signals = _compute_confidence(
+            CHANGED_FILES_SUITABILITY, ["suitability__c", "riskprofile__c"], ["financialaccount"], 2, [], AGENT8_DATA_SUITABILITY
+        )
+        assert "deep_dependency_chain" in signals
+        assert signals["deep_dependency_chain"] == 2
+
 
 # ── Integration tests — full agent run ───────────────────────────────────────
 
@@ -361,3 +438,143 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_has_destructive_changes_detected(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_DESTRUCTIVE
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert result.data["has_destructive_changes"] is True
+
+    async def test_escalated_when_no_files(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_EMPTY
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_SUITABILITY
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_SUITABILITY
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_13_metadata_dependency.get_changed_files",
+                  new_callable=AsyncMock) as mock_files,
+            patch("src.agents.development.agent_13_metadata_dependency.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_branch,
+            patch("src.agents.development.agent_13_metadata_dependency.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_files.return_value = CHANGED_FILES_SUITABILITY
+            mock_branch.return_value = {"branch_name": ""}
+            mock_haiku.return_value = MOCK_TRACE
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], 0, [], None)
+        assert "FSC-2417" in msg
+
+    def test_detected_objects_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", [], ["suitability__c"], [], 0, [], None)
+        assert "suitability__c" in msg
+
+    def test_empty_detected_shows_none(self):
+        msg = _build_trace_message("FSC-2417", [], [], ["financialaccount"], 0, [], None)
+        assert "FSC objects detected in code: ['none']" in msg
+
+    def test_empty_implied_shows_none(self):
+        msg = _build_trace_message("FSC-2417", [], ["suitability__c"], [], 0, [], None)
+        assert "Implied parent objects: ['none']" in msg
+
+    def test_empty_scope_delta_shows_none(self):
+        msg = _build_trace_message("FSC-2417", [], ["suitability__c"], ["financialaccount"], 1, [], None)
+        assert "Scope delta (new objects not in refinement): ['none']" in msg
+
+    def test_refinement_objects_from_agent8_shown(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], 0, [], AGENT8_DATA_SUITABILITY)
+        assert "suitability__c" in msg
+
+    def test_no_agent8_shows_none_for_refinement(self):
+        msg = _build_trace_message("FSC-2417", [], ["suitability__c"], ["financialaccount"], 1, ["extra__c"], None)
+        assert "Objects in refinement prediction: ['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], 0, [], None)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "dependency_complexity"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_dependency_complexity_enum_has_three_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["dependency_complexity"]["enum"] == ["low", "medium", "high"]

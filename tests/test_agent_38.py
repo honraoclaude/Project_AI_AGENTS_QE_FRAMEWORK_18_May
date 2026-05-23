@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_38_flaky_test_hunter import (
+    _build_trace_message,
     _compute_confidence,
     _detect_flaky_tests,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -153,6 +156,19 @@ class TestDetectFlakyTests:
         assert "CRT-001" not in flaky
         assert "CRT-002" not in flaky
 
+    def test_exactly_three_flaky_gives_quarantine_required(self):
+        agent27_three = {
+            "tests_executed": 3,
+            "crt_results": [
+                {"test_id": f"CRT-{i:03d}", "status": "PASSED",
+                 "self_healed": True, "retry_passed": False}
+                for i in range(1, 4)
+            ],
+        }
+        flaky, quarantine, verdict = _detect_flaky_tests(agent27_three)
+        assert verdict == "QUARANTINE_REQUIRED"
+        assert len(quarantine) == 3
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -183,6 +199,34 @@ class TestConfidenceScoring:
         score_with, _ = _compute_confidence(AGENT27_CLEAN, 0)
         score_empty, _ = _compute_confidence(AGENT27_EMPTY, 0)
         assert score_with > score_empty
+
+    def test_crt_results_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_CLEAN, 0)
+        assert "crt_results_available" in signals
+
+    def test_crt_results_available_stores_count(self):
+        _, signals = _compute_confidence(AGENT27_CLEAN, 0)
+        assert signals["crt_results_available"] == 3
+
+    def test_no_tests_executed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_EMPTY, 0)
+        assert "no_tests_executed" in signals
+
+    def test_no_crt_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, 0)
+        assert "no_crt_data" in signals
+
+    def test_no_flaky_tests_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_CLEAN, 0)
+        assert "no_flaky_tests" in signals
+
+    def test_high_flakiness_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_MANY_FLAKY, 4)
+        assert "high_flakiness" in signals
+
+    def test_high_flakiness_stores_count(self):
+        _, signals = _compute_confidence(AGENT27_MANY_FLAKY, 4)
+        assert signals["high_flakiness"] == 4
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -269,3 +313,93 @@ class TestAgentRun:
 
         assert result.agent_id == 38
         assert result.data["flaky_verdict"] == "PASS"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=62, no_crt_data→-15=47, flaky_count=0→no_flaky_tests+5=52 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_38_flaky_test_hunter.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_CLEAN
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_38_flaky_test_hunter.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_CLEAN
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_38_flaky_test_hunter.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_CLEAN
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_38_flaky_test_hunter.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_CLEAN
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", ["CRT-001"], [], "WARN")
+        assert "FSC-2417" in msg
+
+    def test_includes_flaky_tests(self):
+        msg = _build_trace_message("FSC-2417", ["CRT-001"], [], "WARN")
+        assert "CRT-001" in msg
+
+    def test_no_flaky_shows_none_sentinel(self):
+        msg = _build_trace_message("FSC-2417", [], [], "PASS")
+        assert "['none']" in msg
+
+    def test_includes_quarantine_list(self):
+        msg = _build_trace_message("FSC-2417", ["CRT-001", "CRT-002", "CRT-003"],
+                                   ["CRT-001", "CRT-002", "CRT-003"], "QUARANTINE_REQUIRED")
+        assert "CRT-001" in msg
+
+    def test_no_quarantine_shows_none_sentinel(self):
+        msg = _build_trace_message("FSC-2417", ["CRT-001"], [], "WARN")
+        assert "['none']" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", [], [], "QUARANTINE_REQUIRED")
+        assert "QUARANTINE_REQUIRED" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", [], [], "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "flaky_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_flaky_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["flaky_concern"]["enum"] == [
+            "none", "locator_drift", "timing_issue", "data_dependency", "excessive_flakiness",
+        ]

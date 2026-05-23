@@ -10,8 +10,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.refinement.agent_09_risk_anticipation import (
+    _build_user_message,
     _compute_confidence,
     _count_available_agents,
+    _RISK_ITEM_SCHEMA,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -163,6 +167,59 @@ MOCK_RISK_LOW = {
     "recommended_actions": ["Smoke test button label post-deployment."],
 }
 
+_AGENT1_MINIMAL = {
+    "goal": "Record suitability assessment",
+    "persona": "Wealth Adviser",
+    "fsc_objects": ["suitability__c"],
+    "flags": [],
+    "missing_elements": [],
+}
+
+AGENT5B_CLEAN = {
+    "ac_count_challenged": 3, "survivor_count": 3, "critical_weakness_count": 0,
+    "challenge_findings": [], "challenge_summary": "All ACs passed.",
+}
+
+AGENT5B_MINOR = {
+    "ac_count_challenged": 3, "survivor_count": 1, "critical_weakness_count": 2,
+    "challenge_findings": [], "challenge_summary": "Minor issues found.",
+}
+
+AGENT5B_FAILED = {
+    "ac_count_challenged": 3, "survivor_count": 0, "critical_weakness_count": 3,
+    "challenge_findings": [], "challenge_summary": "Major weaknesses.",
+}
+
+MOCK_RISK_EMPTY = {
+    "risk_register": [], "critical_risk_count": 0, "high_risk_count": 0,
+    "overall_risk_level": "LOW", "risk_summary": "No risks.", "recommended_actions": [],
+}
+
+
+def _build_msg_defaults(**agent_kwargs):
+    """Call _build_user_message with STORY_SUITABILITY, only the named agents populated."""
+    a1 = agent_kwargs.get("a1")
+    a2 = agent_kwargs.get("a2")
+    a3 = agent_kwargs.get("a3")
+    a4 = agent_kwargs.get("a4")
+    a5 = agent_kwargs.get("a5")
+    a6 = agent_kwargs.get("a6")
+    a7 = agent_kwargs.get("a7")
+    a8 = agent_kwargs.get("a8")
+    a5b = agent_kwargs.get("a5b")
+    return _build_user_message(
+        STORY_SUITABILITY,
+        a1, 85 if a1 else 0,
+        a2, 85 if a2 else 0,
+        a3, 85 if a3 else 0,
+        a4, 85 if a4 else 0,
+        a5, 85 if a5 else 0,
+        a6, 85 if a6 else 0,
+        a7, 85 if a7 else 0,
+        a8, 85 if a8 else 0,
+        a5b, 85 if a5b else 0,
+    )
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -235,6 +292,50 @@ class TestConfidenceScoring:
         _, signals = _conf(None, 0, None, None, None, None, MOCK_RISK_LOW)
         assert "agent3_unavailable" in signals
 
+    def test_ac_challenge_passed_signal(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT5B_CLEAN, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "ac_challenge_passed" in signals
+
+    def test_ac_challenge_minor_issues_signal(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT5B_MINOR, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "ac_challenge_minor_issues" in signals
+
+    def test_ac_challenge_failed_signal(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, AGENT5B_FAILED, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "ac_challenge_failed" in signals
+
+    def test_empty_risk_register_signal(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_EMPTY)
+        assert "empty_risk_register" in signals
+
+    def test_no_dependencies_signal(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "no_dependencies" in signals
+
+    def test_agent3_agreed_weighted_stores_confidence(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert signals["agent3_agreed_weighted"] == 85
+
+    def test_agent4_available_key_in_signals(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "agent4_available" in signals
+
+    def test_cd_risk_confirmed_stores_verdict(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_AT_RISK, AGENT5_VALIDATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert signals["cd_risk_confirmed"] == "AT_RISK"
+
+    def test_dependency_depth_rich_stores_depth(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_VALIDATED, None, AGENT8_DEEP, MOCK_RISK_LOW)
+        assert signals["dependency_depth_rich"] == 3
+
+    def test_remaining_ac_gaps_stores_count(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_GENERATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert signals["remaining_ac_gaps"] == 1
+
+    def test_acs_generated_not_authored_key_in_signals(self):
+        _, signals = _conf(AGENT3_AGREED, 85, AGENT4_COMPLIANT, AGENT5_GENERATED, None, AGENT8_SHALLOW, MOCK_RISK_LOW)
+        assert "acs_generated_not_authored" in signals
+
 
 # ── Helper unit tests ─────────────────────────────────────────────────────────
 
@@ -255,6 +356,11 @@ class TestCountAvailableAgents:
         for i in range(1, 9):
             state["agent_results"][str(i)] = {"data": {}}
         assert _count_available_agents(state) == 8
+
+    def test_counts_agent_54(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["54"] = {"data": {}}
+        assert _count_available_agents(state) == 1
 
 
 # ── Integration tests — full agent run ───────────────────────────────────────
@@ -434,6 +540,51 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.data["ta_interaction_summary"]["3"] == "OK"
+
+    async def test_unavailable_agent3_causes_escalation(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_RISK_LOW
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_RISK_LOW
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_key_in_data_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_09_risk_anticipation.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_09_risk_anticipation.call_with_tool",
+                  new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_RISK_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
 
 
 # ── TA confidence penalty tests ────────────────────────────────────────────────
@@ -648,3 +799,104 @@ class TestNewRiskSignalsREQ07:
 
         assert "Test Tools:" in captured_user_message
         assert "Postman" in captured_user_message
+
+
+# ── Prompt content tests ─────────────────────────────────────────────────────
+
+class TestBuildUserMessage:
+    def test_includes_story_id(self):
+        msg = _build_msg_defaults()
+        assert "FSC-2417" in msg
+
+    def test_includes_summary(self):
+        msg = _build_msg_defaults()
+        assert STORY_SUITABILITY["summary"] in msg
+
+    def test_includes_note_confidence_instruction(self):
+        msg = _build_msg_defaults()
+        assert "NOTE:" in msg
+
+    def test_agent1_section_present_when_provided(self):
+        msg = _build_msg_defaults(a1=_AGENT1_MINIMAL)
+        assert "AGENT 1 — STORY INTENT" in msg
+
+    def test_agent1_section_absent_when_none(self):
+        msg = _build_msg_defaults()
+        assert "AGENT 1" not in msg
+
+    def test_agent3_shows_ensemble_agreement(self):
+        msg = _build_msg_defaults(a3=AGENT3_AGREED)
+        assert "Ensemble Agreement:" in msg
+
+    def test_agent4_shows_verdict(self):
+        msg = _build_msg_defaults(a4=AGENT4_AT_RISK)
+        assert "Verdict:" in msg
+
+    def test_agent5_shows_vulnerable_customer_field(self):
+        msg = _build_msg_defaults(a5=AGENT5_WITH_VC_COVERAGE)
+        assert "vulnerable_customer=" in msg
+
+    def test_agent5b_section_present_when_provided(self):
+        msg = _build_msg_defaults(a5b=AGENT5B_CLEAN)
+        assert "AGENT 5B — AC CHALLENGER" in msg
+
+    def test_agent5b_section_absent_when_none(self):
+        msg = _build_msg_defaults()
+        assert "AGENT 5B" not in msg
+
+    def test_agent6_shows_test_tools(self):
+        msg = _build_msg_defaults(a6=AGENT6_WITH_POSTMAN)
+        assert "Test Tools:" in msg
+
+    def test_agent7_shows_fca_context_available(self):
+        msg = _build_msg_defaults(a7=AGENT7_NO_FCA_CONTEXT)
+        assert "FCA Context Available:" in msg
+
+    def test_agent8_shows_has_external_dependencies(self):
+        msg = _build_msg_defaults(a8=AGENT8_WITH_EXTERNAL_DEPS)
+        assert "Has External Dependencies:" in msg
+
+    def test_ends_with_tool_name_and_risk_register(self):
+        msg = _build_msg_defaults()
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("risk register.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_tool_schema_has_six_required_fields(self):
+        expected = {
+            "critical_risk_count", "high_risk_count", "overall_risk_level",
+            "risk_summary", "recommended_actions", "risk_register",
+        }
+        assert set(_TOOL_SCHEMA["required"]) == expected
+
+    def test_risk_register_is_array(self):
+        assert _TOOL_SCHEMA["properties"]["risk_register"]["type"] == "array"
+
+    def test_risk_item_schema_has_six_required_fields(self):
+        expected = {"risk_id", "category", "description", "severity", "mitigation", "source_agent"}
+        assert set(_RISK_ITEM_SCHEMA["required"]) == expected
+
+    def test_category_enum_has_five_values(self):
+        schema = _RISK_ITEM_SCHEMA["properties"]["category"]
+        assert schema["enum"] == ["regulatory", "consumer_duty", "technical", "data", "quality"]
+
+    def test_severity_enum_has_four_values(self):
+        schema = _RISK_ITEM_SCHEMA["properties"]["severity"]
+        assert schema["enum"] == ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+    def test_critical_risk_count_minimum_zero(self):
+        assert _TOOL_SCHEMA["properties"]["critical_risk_count"]["minimum"] == 0
+
+    def test_high_risk_count_minimum_zero(self):
+        assert _TOOL_SCHEMA["properties"]["high_risk_count"]["minimum"] == 0
+
+    def test_overall_risk_level_enum_has_four_values(self):
+        schema = _TOOL_SCHEMA["properties"]["overall_risk_level"]
+        assert schema["enum"] == ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+    def test_recommended_actions_is_array_of_strings(self):
+        items = _TOOL_SCHEMA["properties"]["recommended_actions"]["items"]
+        assert items["type"] == "string"

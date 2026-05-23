@@ -5,15 +5,21 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.development.agent_21_test_data_architect import (
+    _build_mechanism_signal,
+    _build_prompt,
+    _compute_completeness,
     _compute_confidence,
+    _DATA_TOOL_NAME,
+    _DATA_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-AGENT3_HIGH = {"fca_classification": "HIGH", "ensemble_agreement": True}
-AGENT3_LOW  = {"fca_classification": "LOW",  "ensemble_agreement": True}
+AGENT3_HIGH   = {"fca_classification": "HIGH",   "ensemble_agreement": True}
+AGENT3_MEDIUM = {"fca_classification": "MEDIUM", "ensemble_agreement": True}
+AGENT3_LOW    = {"fca_classification": "LOW",    "ensemble_agreement": True}
 
 AGENT5_DATA = {"ac_count": 3, "acs_generated": True}
 
@@ -198,6 +204,86 @@ class TestConfidenceScoring:
         )
         assert score >= 20
 
+    def test_fca_classification_available_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "fca_classification_available" in signals
+
+    def test_data_needs_from_refinement_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "data_needs_from_refinement" in signals
+
+    def test_no_data_needs_baseline_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, None, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "no_data_needs_baseline" in signals
+
+    def test_metadata_scope_available_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "metadata_scope_available" in signals
+
+    def test_gherkin_scenarios_available_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "gherkin_scenarios_available" in signals
+
+    def test_no_gherkin_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, None,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "no_gherkin_scenarios" in signals
+
+    def test_seed_records_designed_stores_count(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=3, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert signals["seed_records_designed"] == 3
+
+    def test_no_seed_records_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=0, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=["VCI_01"],
+        )
+        assert "no_seed_records" in signals
+
+    def test_regulated_story_missing_vulnerable_profiles_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=2, verdict="PASS", fca_class="HIGH",
+            vulnerable_profiles=[],
+        )
+        assert "regulated_story_missing_vulnerable_profiles" in signals
+
+    def test_incomplete_strategy_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT3_HIGH, AGENT7_DATA, AGENT13_DATA, AGENT19_DATA,
+            seed_record_count=0, verdict="INCOMPLETE", fca_class="HIGH",
+            vulnerable_profiles=[],
+        )
+        assert "incomplete_strategy" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -306,6 +392,52 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=68, no_data_needs_baseline=-5, no_gherkin=-5, no_seed_records=-10, incomplete=-10 → 38 < 60
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_INCOMPLETE
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
 
 
 # ── Mechanism design signal tests ─────────────────────────────────────────────
@@ -532,3 +664,131 @@ class TestIsolationOverrideREQ05:
 
         assert "isolation_override" in result.data
         assert "isolation_override_reason" in result.data
+
+    async def test_medium_fca_shared_org_data_triggers_override(self):
+        """MEDIUM FCA + shared_org_data also triggers isolation override (same rule as HIGH)."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_MEDIUM}
+        state["agent_results"]["7"] = {"data": AGENT7_SHARED_ORG}
+
+        with (
+            patch("src.agents.development.agent_21_test_data_architect.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_21_test_data_architect.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_sonnet.return_value = MOCK_DATA_PASS
+            result = await run(state)
+
+        assert result.data["isolation_override"] is True
+
+
+# ── _build_prompt unit tests ──────────────────────────────────────────────────
+
+_SIMPLE_STORY = {"summary": "Test Story", "description": "desc"}
+
+class TestBuildPrompt:
+    def test_includes_story_id(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "HIGH", [], [], [], 3)
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "HIGH", [], [], [], 0)
+        assert "HIGH" in msg
+
+    def test_no_gherkin_shows_placeholder(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "LOW", [], [], [], 0)
+        assert "(no Gherkin scenarios available)" in msg
+
+    def test_gherkin_titles_shown(self):
+        scenarios = [{"title": "Suitability fails for HIGH-risk client", "tags": [], "steps": []}]
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "HIGH", [], scenarios, [], 1)
+        assert "Suitability fails for HIGH-risk client" in msg
+
+    def test_no_data_needs_shows_not_captured(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "LOW", [], [], [], 0)
+        assert "not captured" in msg
+
+    def test_no_objects_shows_not_determined(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "LOW", [], [], [], 0)
+        assert "not yet determined" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, "HIGH", [], [], [], 0)
+        assert _DATA_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── _compute_completeness unit tests ─────────────────────────────────────────
+
+_SEED_RECORD = [{"object_name": "FinancialAccount", "record_count": 1,
+                 "key_fields": ["Balance__c"], "purpose": "test"}]
+
+class TestComputeCompleteness:
+    def test_full_data_gives_100(self):
+        score = _compute_completeness(_SEED_RECORD, "LOW", [], "PASS", ["Name"])
+        assert score == 100
+
+    def test_no_seed_records_reduces_score(self):
+        score = _compute_completeness([], "LOW", [], "PASS", ["Name"])
+        assert score == 70
+
+    def test_regulated_missing_vc_profiles_reduces_score(self):
+        score_with = _compute_completeness(_SEED_RECORD, "HIGH", ["VCI_01"], "PASS", ["Name"])
+        score_without = _compute_completeness(_SEED_RECORD, "HIGH", [], "PASS", ["Name"])
+        assert score_with > score_without
+        assert score_without == 75
+
+    def test_no_anon_fields_reduces_score(self):
+        score = _compute_completeness(_SEED_RECORD, "LOW", [], "PASS", [])
+        assert score == 85
+
+    def test_incomplete_verdict_reduces_score(self):
+        score = _compute_completeness(_SEED_RECORD, "LOW", [], "INCOMPLETE", ["Name"])
+        assert score == 80
+
+
+# ── _build_mechanism_signal unit tests ───────────────────────────────────────
+
+class TestBuildMechanismSignal:
+    def test_all_keys_present(self):
+        signal = _build_mechanism_signal(_SEED_RECORD, "LOW", [], "PASS", ["Name"])
+        assert "vulnerable_profile_missing" in signal
+        assert "seed_records_missing" in signal
+        assert "downstream_penalty_active" in signal
+
+    def test_seed_records_missing_true_when_empty(self):
+        signal = _build_mechanism_signal([], "LOW", [], "PASS", ["Name"])
+        assert signal["seed_records_missing"] is True
+
+    def test_vulnerable_profile_missing_true_for_high_fca_no_profiles(self):
+        signal = _build_mechanism_signal(_SEED_RECORD, "HIGH", [], "PASS", ["Name"])
+        assert signal["vulnerable_profile_missing"] is True
+
+    def test_downstream_penalty_active_false_when_completeness_ge_70(self):
+        # completeness=100 → downstream_penalty_active=False
+        signal = _build_mechanism_signal(_SEED_RECORD, "LOW", [], "PASS", ["Name"])
+        assert signal["downstream_penalty_active"] is False
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_seven_required_fields(self):
+        assert set(_DATA_TOOL_SCHEMA["required"]) == {
+            "seed_records", "requires_anonymisation", "anonymisation_fields",
+            "vulnerable_profiles", "data_verdict", "data_setup_notes", "coverage_gaps",
+        }
+
+    def test_data_verdict_enum_has_three_values(self):
+        assert _DATA_TOOL_SCHEMA["properties"]["data_verdict"]["enum"] == [
+            "PASS", "WARN", "INCOMPLETE"
+        ]
+
+    def test_seed_records_is_array_type(self):
+        assert _DATA_TOOL_SCHEMA["properties"]["seed_records"]["type"] == "array"
+
+    def test_seed_record_item_has_four_required_fields(self):
+        item_required = set(_DATA_TOOL_SCHEMA["properties"]["seed_records"]["items"]["required"])
+        assert item_required == {"object_name", "record_count", "key_fields", "purpose"}

@@ -6,7 +6,10 @@ import pytest
 
 from src.agents.release.agent_48_rollback_readiness import (
     _assess_rollback,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -168,6 +171,18 @@ class TestConfidenceScoring:
         _, signals = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
         assert isinstance(signals, dict)
 
+    def test_metadata_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert "metadata_available" in signals
+
+    def test_no_metadata_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT41_PASS)
+        assert "no_metadata" in signals
+
+    def test_change_set_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_CLEAN, AGENT41_PASS)
+        assert "change_set_data_available" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -290,6 +305,47 @@ class TestAgentRun:
 
         assert isinstance(result.confidence.escalated, bool)
 
+    async def test_escalated_when_no_upstream_data(self):
+        # base=55, no_metadata→-10=45, no agent41 → no delta → 45 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_48_rollback_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
 
 # ── REQ-31: new tests ─────────────────────────────────────────────────────────
 
@@ -345,6 +401,47 @@ class TestREQ31MajorReleaseElevatesRisk:
         _, risk, _, verdict = _assess_rollback(None, AGENT13_CLEAN, AGENT40_PATCH, AGENT41_PASS)
         assert risk == "LOW"
         assert verdict == "FEASIBLE"
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, "LOW", [], "FEASIBLE")
+        assert "FSC-2417" in msg
+
+    def test_includes_feasible_flag(self):
+        msg = _build_trace_message("FSC-001", False, "HIGH", [], "NOT_FEASIBLE")
+        assert "False" in msg
+
+    def test_includes_risk_level(self):
+        msg = _build_trace_message("FSC-001", True, "MEDIUM", [], "RISKY")
+        assert "MEDIUM" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", False, "HIGH", [], "NOT_FEASIBLE")
+        assert "NOT_FEASIBLE" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", True, "LOW", [], "FEASIBLE")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "rollback_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_rollback_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["rollback_concern"]["enum"] == [
+            "none", "destructive_changes", "schema_migration",
+            "data_writes", "high_complexity",
+        ]
 
 
 class TestREQ31ExistingBehaviourPreserved:

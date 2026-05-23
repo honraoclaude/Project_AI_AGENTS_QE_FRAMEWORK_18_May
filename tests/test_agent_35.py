@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_35_root_cause_analyser import (
+    _build_rca_message,
     _compute_confidence,
+    _RCA_TOOL_NAME,
+    _RCA_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -154,6 +157,30 @@ class TestConfidenceScoring:
         score_without, _ = _compute_confidence(AGENT34_NO_DEFECTS, None, 0, "NO_ACTION_REQUIRED")
         assert score_with >= score_without
 
+    def test_defects_to_analyse_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT34_WITH_DEFECTS, None, 1, "NO_ACTION_REQUIRED")
+        assert "defects_to_analyse" in signals
+
+    def test_no_defects_clean_slate_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT34_NO_DEFECTS, None, 0, "NO_ACTION_REQUIRED")
+        assert "no_defects_clean_slate" in signals
+
+    def test_no_defect_triage_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, 0, "NO_ACTION_REQUIRED")
+        assert "no_defect_triage_data" in signals
+
+    def test_flaky_test_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT34_NO_DEFECTS, AGENT38_CLEAN, 0, "NO_ACTION_REQUIRED")
+        assert "flaky_test_data_available" in signals
+
+    def test_complete_fix_plan_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT34_WITH_DEFECTS, None, 1, "RESOLVED_PLAN")
+        assert "complete_fix_plan" in signals
+
+    def test_incomplete_rca_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT34_WITH_DEFECTS, None, 1, "INCOMPLETE")
+        assert "incomplete_rca" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -245,3 +272,107 @@ class TestAgentRun:
 
         assert result.agent_id == 35
         assert result.data["rca_verdict"] in ("NO_ACTION_REQUIRED", "RESOLVED_PLAN", "INCOMPLETE")
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=62, no_defect_triage_data→-10 = 52 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_35_root_cause_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RCA_NO_ACTION
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_35_root_cause_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RCA_NO_ACTION
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_35_root_cause_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RCA_NO_ACTION
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_35_root_cause_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RCA_NO_ACTION
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── RCA message unit tests ────────────────────────────────────────────────────
+
+class TestBuildRcaMessage:
+    def test_includes_story_id(self):
+        msg = _build_rca_message("FSC-2417", None, None, None, None, None, None)
+        assert "FSC-2417" in msg
+
+    def test_includes_crt_verdict(self):
+        msg = _build_rca_message("FSC-2417", AGENT27_FAIL, None, None, None, None, None)
+        assert "FAIL" in msg
+
+    def test_includes_heal_verdict(self):
+        msg = _build_rca_message("FSC-2417", None, AGENT28_SUSPECT, None, None, None, None)
+        assert "REVIEW_REQUIRED" in msg
+
+    def test_includes_coverage_pct(self):
+        msg = _build_rca_message("FSC-2417", None, None, AGENT33_FAIL, None, None, None)
+        assert "60.0" in msg
+
+    def test_includes_uncovered_acs(self):
+        msg = _build_rca_message("FSC-2417", None, None, AGENT33_FAIL, None, None, None)
+        assert "AC3" in msg
+
+    def test_includes_defect_details(self):
+        msg = _build_rca_message("FSC-2417", None, None, None, AGENT34_WITH_DEFECTS, None, None)
+        assert "DEF-001" in msg
+
+    def test_no_defects_shows_none_sentinel(self):
+        msg = _build_rca_message("FSC-2417", None, None, None, None, None, None)
+        assert "(none)" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_rca_message("FSC-2417", None, None, None, None, None, None)
+        assert _RCA_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_five_required_fields(self):
+        assert set(_RCA_TOOL_SCHEMA["required"]) == {
+            "root_causes", "rca_verdict", "fix_plan_complete",
+            "estimated_effort", "narrative",
+        }
+
+    def test_narrative_is_string(self):
+        assert _RCA_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_rca_verdict_enum(self):
+        assert _RCA_TOOL_SCHEMA["properties"]["rca_verdict"]["enum"] == [
+            "RESOLVED_PLAN", "NO_ACTION_REQUIRED", "INCOMPLETE",
+        ]
+
+    def test_root_cause_item_has_five_required_fields(self):
+        items = _RCA_TOOL_SCHEMA["properties"]["root_causes"]["items"]
+        assert set(items["required"]) == {"defect_id", "root_cause", "fix_action", "owner", "effort"}
+
+    def test_effort_enum_has_three_values(self):
+        items = _RCA_TOOL_SCHEMA["properties"]["root_causes"]["items"]
+        assert items["properties"]["effort"]["enum"] == ["LOW", "MEDIUM", "HIGH"]

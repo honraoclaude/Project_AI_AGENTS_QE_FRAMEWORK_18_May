@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_41_change_set_integrity import (
+    _build_trace_message,
     _check_integrity,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -113,6 +116,20 @@ class TestCheckIntegrity:
         valid, _, _, _ = _check_integrity(None, AGENT13_DESTRUCTIVE, AGENT40_COMPOSED)
         assert valid is True
 
+    def test_component_count_drives_large_threshold_when_larger_than_files(self):
+        # max(component_count=25, changed_files=4) = 25 > 20 → WARN
+        agent40_large = {**AGENT40_COMPOSED, "component_count": 25}
+        agent13_small = {**AGENT13_CLEAN, "changed_files_count": 4}
+        _, issues, _, verdict = _check_integrity(None, agent13_small, agent40_large)
+        assert verdict == "WARN"
+        assert any("large" in i.lower() for i in issues)
+
+    def test_both_hard_flags_collected(self):
+        # composer_failed AND missing_deps → both hard flags → FAIL with 2+ issues
+        _, issues, _, verdict = _check_integrity(None, AGENT13_MISSING_DEPS, AGENT40_FAILED)
+        assert verdict == "FAIL"
+        assert len(issues) >= 2
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -138,6 +155,22 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, False)
         assert score >= 20
+
+    def test_release_package_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT40_COMPOSED, True)
+        assert "release_package_available" in signals
+
+    def test_no_release_package_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, True)
+        assert "no_release_package" in signals
+
+    def test_metadata_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_CLEAN, AGENT40_COMPOSED, True)
+        assert "metadata_available" in signals
+
+    def test_integrity_check_failed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_CLEAN, AGENT40_COMPOSED, False)
+        assert "integrity_check_failed" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -219,6 +252,47 @@ class TestAgentRun:
 
         assert result.model_used == "claude-haiku-4-5-20251001"
 
+    async def test_escalated_when_no_release_package_and_invalid(self):
+        # base=65, no_release_package→-10=55, metadata_available→+5=60, integrity_check_failed→-8=52 < 60
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_MISSING_DEPS}
+
+        with patch("src.agents.release.agent_41_change_set_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_41_change_set_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_41_change_set_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_41_change_set_integrity.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
 
 
 # ── REQ-26: new tests ─────────────────────────────────────────────────────────
@@ -276,3 +350,57 @@ class TestREQ26TypedFlagsClassification:
         valid, _, _, verdict = _check_integrity(None, AGENT13_DESTRUCTIVE, AGENT40_COMPOSED_NO_EXT)
         assert verdict == "WARN"
         assert valid is True
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert "FSC-2417" in msg
+
+    def test_includes_release_name(self):
+        msg = _build_trace_message("FSC-2417", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert "FSC-2417-minor-release" in msg
+
+    def test_includes_component_count(self):
+        msg = _build_trace_message("FSC-001", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert "4" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert "PASS" in msg
+
+    def test_issues_sentinel_when_no_issues(self):
+        msg = _build_trace_message("FSC-001", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert "['none']" in msg
+
+    def test_includes_issue_text_when_issues_present(self):
+        issues = ["Missing dependencies detected: ['Dep__c']"]
+        msg = _build_trace_message("FSC-001", False, issues, False, "FAIL", AGENT40_COMPOSED)
+        assert "Missing dependencies" in msg
+
+    def test_unknown_release_when_no_agent40(self):
+        msg = _build_trace_message("FSC-001", True, [], False, "PASS", None)
+        assert "unknown" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", True, [], False, "PASS", AGENT40_COMPOSED)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "integrity_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_integrity_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["integrity_concern"]["enum"] == [
+            "none", "destructive_changes", "missing_dependencies",
+            "profile_only", "oversized_change_set",
+        ]

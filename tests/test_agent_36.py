@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_36_uat_coordination import (
+    _build_trace_message,
     _compute_confidence,
     _coordinate_uat,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -146,6 +149,14 @@ class TestCoordinateUAT:
         assert verdict == "PENDING"
         assert sent is True
 
+    def test_low_fca_co_required_true_gives_pending(self):
+        # co_required overrides NOT_REQUIRED — must still send sign-off request
+        _, _, sent, verdict = _coordinate_uat(
+            AGENT3_LOW, AGENT29_CO_REQUIRED, AGENT33_PASS, AGENT34_PASS, None,
+        )
+        assert verdict == "PENDING"
+        assert sent is True
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -171,6 +182,30 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, None, "BLOCKED")
         assert score >= 20
+
+    def test_fca_classification_known_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, None, None, None, "PENDING")
+        assert "fca_classification_known" in signals
+
+    def test_fca_classification_unknown_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, "NOT_REQUIRED")
+        assert "fca_classification_unknown" in signals
+
+    def test_uat_test_results_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT29_CO_REQUIRED, None, None, "NOT_REQUIRED")
+        assert "uat_test_results_available" in signals
+
+    def test_no_uat_results_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, "NOT_REQUIRED")
+        assert "no_uat_results" in signals
+
+    def test_coverage_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, AGENT33_PASS, None, "NOT_REQUIRED")
+        assert "coverage_data_available" in signals
+
+    def test_sign_off_blocked_by_defects_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS, AGENT34_FAIL, "BLOCKED")
+        assert "sign_off_blocked_by_defects" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -270,3 +305,105 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=60, fca_unknown→-8, no_uat_results→-5 = 47 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_36_uat_coordination.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_NOT_REQUIRED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_36_uat_coordination.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_NOT_REQUIRED
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_36_uat_coordination.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_NOT_REQUIRED
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_36_uat_coordination.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_NOT_REQUIRED
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "HIGH" in msg
+
+    def test_includes_uat_count(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "4" in msg
+
+    def test_includes_coverage_pct(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "92.0" in msg
+
+    def test_includes_coordination_verdict(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "PENDING" in msg
+
+    def test_includes_sign_off_required_true(self):
+        msg = _build_trace_message("FSC-2417", True, False, True, "PENDING",
+                                   AGENT3_HIGH, AGENT29_CO_REQUIRED, AGENT33_PASS)
+        assert "True" in msg
+
+    def test_unknown_fca_class_when_no_agent3(self):
+        msg = _build_trace_message("FSC-2417", False, False, False, "NOT_REQUIRED",
+                                   None, None, None)
+        assert "UNKNOWN" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", False, False, False, "NOT_REQUIRED",
+                                   None, None, None)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "coordination_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_coordination_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["coordination_concern"]["enum"] == [
+            "none", "sign_off_pending", "uat_failures_block_sign_off",
+            "coverage_below_threshold", "no_uat_tests",
+        ]

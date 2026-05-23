@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.monitoring.agent_53_incident_response import (
+    _build_incident_context,
     _compute_confidence,
+    _INCIDENT_TOOL_NAME,
+    _INCIDENT_TOOL_SCHEMA,
     run,
     run_incident,
 )
@@ -99,6 +102,31 @@ class TestConfidenceScoring:
     def test_returns_signals_dict(self):
         _, signals = _compute_confidence("P2", 3)
         assert isinstance(signals, dict)
+
+    def test_p1_severity_signal_key_in_signals(self):
+        _, signals = _compute_confidence("P1", 3)
+        assert "p1_severity" in signals
+
+    def test_p3_low_severity_signal_key_in_signals(self):
+        _, signals = _compute_confidence("P3", 3)
+        assert "p3_low_severity" in signals
+
+    def test_detailed_triage_plan_signal_stores_step_count(self):
+        _, signals = _compute_confidence("P2", 5)
+        assert signals["detailed_triage_plan"] == 5
+
+    def test_no_triage_steps_signal_key_in_signals(self):
+        _, signals = _compute_confidence("P2", 0)
+        assert "no_triage_steps" in signals
+
+    def test_steps_count_1_and_2_no_severity_specific_signal(self):
+        # 1-2 steps: neither the >=3 arm nor the ==0 arm fires
+        _, signals_1 = _compute_confidence("P2", 1)
+        _, signals_2 = _compute_confidence("P2", 2)
+        assert "detailed_triage_plan" not in signals_1
+        assert "no_triage_steps" not in signals_1
+        assert "detailed_triage_plan" not in signals_2
+        assert "no_triage_steps" not in signals_2
 
 
 # ── run() integration tests ───────────────────────────────────────────────────
@@ -219,6 +247,38 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.agent_id == 53
+
+    async def test_escalated_when_p1_and_no_steps(self):
+        # base=65 -5(P1) -10(no steps) = 50 < 60 → escalated=True
+        state = initial_story_state("FSC-2417")
+        mock_p1_no_steps = {**MOCK_TRIAGE_P1, "triage_steps": [], "incident_severity": "P1"}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = mock_p1_no_steps
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_TRIAGE_P2
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_TRIAGE_P2
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
 
 
 # ── run_incident() webhook entry point tests ──────────────────────────────────
@@ -347,6 +407,19 @@ class TestREQ34DeterministicCOEscalation:
 
         assert result.data["escalate_to"].count("CO") == 1
 
+    async def test_unknown_fca_does_not_add_co(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": {"fca_classification": "UNKNOWN"}}
+
+        with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet, \
+             patch("src.agents.monitoring.agent_53_incident_response.qds") as mock_qds:
+            mock_sonnet.return_value = MOCK_TRIAGE_NO_CO
+            mock_qds.emit_decision_event = AsyncMock()
+            result = await run(state)
+
+        assert "CO" not in result.data["escalate_to"]
+
     async def test_run_incident_high_fca_adds_co(self):
         with patch("src.agents.monitoring.agent_53_incident_response.call_with_tool",
                    new_callable=AsyncMock) as mock_sonnet, \
@@ -393,3 +466,55 @@ class TestREQ34FcaAuditLedgerWrite:
 
         assert result.agent_id == 53
         assert "incident_verdict" in result.data
+
+
+# ── _build_incident_context unit tests ───────────────────────────────────────
+
+class TestBuildIncidentContext:
+    def test_includes_story_id(self):
+        msg = _build_incident_context("FSC-2417", None, None, None, "UNKNOWN")
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_classification(self):
+        msg = _build_incident_context("FSC-001", None, None, None, "HIGH")
+        assert "HIGH" in msg
+
+    def test_alerts_sentinel_when_empty(self):
+        # alerts_triggered=[] → alerts or ['none'] → "['none']"
+        agent49_no_alerts = {"monitor_verdict": "MONITORING", "health_status": "NOMINAL", "alerts_triggered": []}
+        msg = _build_incident_context("FSC-001", None, agent49_no_alerts, None, "UNKNOWN")
+        assert "['none']" in msg
+
+    def test_degraded_agents_sentinel_when_empty(self):
+        # degraded_agents=[] → degraded_agents or ['none'] → "['none']"
+        agent51_no_degraded = {"degraded_agents": []}
+        msg = _build_incident_context("FSC-001", None, None, agent51_no_degraded, "UNKNOWN")
+        assert "['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_incident_context("FSC-001", None, None, None, "UNKNOWN")
+        assert _INCIDENT_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_seven_required_fields(self):
+        assert set(_INCIDENT_TOOL_SCHEMA["required"]) == {
+            "incident_severity", "rollback_recommended", "triage_steps",
+            "escalate_to", "estimated_resolution", "incident_verdict", "narrative",
+        }
+
+    def test_incident_severity_enum_has_three_values(self):
+        assert _INCIDENT_TOOL_SCHEMA["properties"]["incident_severity"]["enum"] == ["P1", "P2", "P3"]
+
+    def test_incident_verdict_enum_has_three_values(self):
+        assert _INCIDENT_TOOL_SCHEMA["properties"]["incident_verdict"]["enum"] == [
+            "CONTAINED", "ESCALATING", "MONITORING",
+        ]
+
+    def test_escalate_to_items_enum_has_five_values(self):
+        assert _INCIDENT_TOOL_SCHEMA["properties"]["escalate_to"]["items"]["enum"] == [
+            "CO", "PO", "BUSINESS", "QE_LEAD", "TECH_LEAD",
+        ]

@@ -6,7 +6,10 @@ import pytest
 
 from src.agents.testing.agent_33_test_coverage_analyser import (
     _analyse_coverage,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -214,6 +217,42 @@ class TestAnalyseCoverage:
         )
         assert pct <= 100.0
 
+    def test_medium_fca_vc_impact_no_vc_coverage_gives_fail(self):
+        # MEDIUM FCA + VC impact required + vc_coverage_present=False → FAIL
+        _, _, _, verdict = _analyse_coverage(
+            AGENT3_MEDIUM, AGENT4_VC_IMPACT, AGENT5_FOUR_ACS, AGENT19_WITHOUT_VC_FLAG,
+            AGENT26_FULL, None, AGENT29_FOUR, AGENT30_PRESENT,
+        )
+        assert verdict == "FAIL"
+
+    def test_by_type_has_vulnerable_customer_covered_key(self):
+        _, by_type, _, _ = _analyse_coverage(
+            AGENT3_LOW, None, None, AGENT19_FIVE, None, None, None, None,
+        )
+        assert "vulnerable_customer_covered" in by_type
+
+    def test_gherkin_capped_at_100_when_scenarios_exceed_ac_count(self):
+        # 5 gherkin / 2 ACs = 250% → capped at 100%
+        pct, _, _, _ = _analyse_coverage(
+            AGENT3_LOW, None, AGENT5_TWO_ACS, AGENT19_FIVE, None, None, None, None,
+        )
+        assert pct == 100.0
+
+    def test_uncovered_ac_clause_missing_description_uses_fallback(self):
+        agent5_sparse = {
+            "ac_count": 3,
+            "ac_clauses": [
+                {"description": "AC1: Block unsuitable products"},
+                {},  # no description → fallback "AC2"
+                {},  # no description → fallback "AC3"
+            ],
+        }
+        _, _, uncovered, _ = _analyse_coverage(
+            AGENT3_LOW, None, agent5_sparse, None, None, None, AGENT29_ZERO, None,
+        )
+        assert "AC2" in uncovered
+        assert "AC3" in uncovered
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -256,6 +295,39 @@ class TestConfidenceScoring:
         )
         score_one, _ = _compute_confidence(AGENT19_FIVE, None, None, None, 60.0)
         assert score_full > score_one
+
+    def test_comprehensive_test_data_key_and_value(self):
+        _, signals = _compute_confidence(
+            AGENT19_FIVE, AGENT26_FULL, AGENT29_FOUR, AGENT30_PRESENT, 95.0,
+        )
+        assert "comprehensive_test_data" in signals
+        assert signals["comprehensive_test_data"] == 4
+
+    def test_partial_test_data_key_and_value(self):
+        _, signals = _compute_confidence(AGENT19_FIVE, None, None, None, 60.0)
+        assert "partial_test_data" in signals
+        assert signals["partial_test_data"] == 1
+
+    def test_no_test_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, 0.0)
+        assert "no_test_data" in signals
+
+    def test_high_coverage_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT19_FIVE, AGENT26_FULL, AGENT29_FOUR, AGENT30_PRESENT, 85.0,
+        )
+        assert "high_coverage" in signals
+
+    def test_low_coverage_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, 30.0)
+        assert "low_coverage" in signals
+
+    def test_crt_scenario_truncated_key_in_signals(self):
+        _, signals = _compute_confidence(
+            AGENT19_FIVE, AGENT26_FULL, AGENT29_FOUR, AGENT30_PRESENT, 95.0,
+            scenarios_truncated=True, truncated_count=2,
+        )
+        assert "crt_scenario_truncated" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -356,6 +428,37 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.data["narrative"] == MOCK_TRACE_PASS["narrative"]
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=65, no_test_data→-10, low_coverage(0%)→-5 = 50 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_33_test_coverage_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_33_test_coverage_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_33_test_coverage_analyser.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
 
 
 # ── REQ-24: New gap tests ──────────────────────────────────────────────────────
@@ -473,3 +576,63 @@ class TestTruncationConfidencePenaltyREQ24:
         score_trunc, _   = _compute_confidence(AGENT19_FIVE, AGENT26_TRUNCATED, AGENT29_FOUR, AGENT30_PRESENT, 95.0,
                                                scenarios_truncated=True, truncated_count=2)
         assert score_clean > score_trunc
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+_SAMPLE_BY_TYPE = {
+    "gherkin": 5,
+    "crt_automation_pct": 100.0,
+    "crt_executed": 3,
+    "uat": 4,
+    "fca_regulatory": 2,
+    "vulnerable_customer_covered": True,
+}
+
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert "FSC-2417" in msg
+
+    def test_includes_overall_pct(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert "85.0%" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert "Verdict: PASS" in msg
+
+    def test_includes_gherkin_count(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert "Gherkin scenarios: 5" in msg
+
+    def test_no_uncovered_shows_none(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert "['none']" in msg
+
+    def test_includes_uncovered_acs(self):
+        msg = _build_trace_message("FSC-2417", 65.0, _SAMPLE_BY_TYPE, ["AC3", "AC4"], "WARN")
+        assert "AC3" in msg
+        assert "AC4" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", 85.0, _SAMPLE_BY_TYPE, [], "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "coverage_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_coverage_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["coverage_concern"]["enum"] == [
+            "none", "below_threshold", "fca_scenarios_uncovered",
+            "uat_uncovered", "multiple",
+        ]

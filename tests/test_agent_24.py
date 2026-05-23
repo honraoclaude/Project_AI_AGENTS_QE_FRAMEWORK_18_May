@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_24_test_strategy_validator import (
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     _validate_strategy,
     run,
 )
@@ -149,6 +152,48 @@ class TestStrategyValidation:
         assert verdict == "WARN"
         assert valid is True
 
+    def test_medium_fca_insufficient_scenarios_fails(self):
+        agent19_few = {"scenario_count": 2, "fca_coverage_present": True, "gherkin_verdict": "WARN"}
+        valid, verdict, gaps, _ = _validate_strategy(
+            AGENT3_MEDIUM, None, agent19_few, AGENT21_PASS, AGENT23_PASS
+        )
+        assert verdict == "FAIL"
+        assert valid is False
+        assert any("Insufficient" in g for g in gaps)
+
+    def test_medium_fca_missing_fca_scenarios_fails(self):
+        agent19_no_fca = {**AGENT19_FULL, "fca_coverage_present": False}
+        _, verdict, gaps, fca_covered = _validate_strategy(
+            AGENT3_MEDIUM, None, agent19_no_fca, AGENT21_PASS, AGENT23_PASS
+        )
+        assert verdict == "FAIL"
+        assert fca_covered is False
+        assert any("FCA" in g for g in gaps)
+
+    def test_incomplete_test_data_is_critical_failure(self):
+        valid, verdict, _, _ = _validate_strategy(
+            AGENT3_LOW, None, AGENT19_FULL, AGENT21_INCOMPLETE, AGENT23_PASS
+        )
+        assert verdict == "FAIL"
+        assert valid is False
+
+    def test_warn_data_verdict_adds_non_critical_gap(self):
+        agent21_warn = {**AGENT21_PASS, "data_verdict": "WARN", "vulnerable_profiles": ["VCI_01"]}
+        valid, verdict, gaps, _ = _validate_strategy(
+            AGENT3_LOW, None, AGENT19_FULL, agent21_warn, AGENT23_PASS
+        )
+        assert verdict == "WARN"
+        assert valid is True
+        assert any("WARN" in g or "gaps" in g.lower() for g in gaps)
+
+    def test_high_fca_missing_vulnerable_profiles_verdict_is_warn(self):
+        agent21_no_vci = {**AGENT21_PASS, "vulnerable_profiles": []}
+        valid, verdict, _, _ = _validate_strategy(
+            AGENT3_HIGH, None, AGENT19_FULL, agent21_no_vci, AGENT23_PASS
+        )
+        assert verdict == "WARN"
+        assert valid is True
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -169,6 +214,30 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, False)
         assert score >= 20
+
+    def test_fca_classification_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT19_FULL, AGENT21_PASS, True)
+        assert "fca_classification_available" in signals
+
+    def test_gherkin_scenarios_available_key_and_value(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT19_FULL, AGENT21_PASS, True)
+        assert signals["gherkin_scenarios_available"] == 5
+
+    def test_no_gherkin_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT19_EMPTY, AGENT21_PASS, True)
+        assert "no_gherkin_scenarios" in signals
+
+    def test_no_gherkin_agent_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, None, AGENT21_PASS, True)
+        assert "no_gherkin_agent_data" in signals
+
+    def test_test_data_strategy_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT19_FULL, AGENT21_PASS, True)
+        assert "test_data_strategy_available" in signals
+
+    def test_strategy_invalid_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT19_FULL, AGENT21_PASS, False)
+        assert "strategy_invalid" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -211,6 +280,47 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=65, no agent19→-8, valid=False→-8 = 49 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_24_test_strategy_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_24_test_strategy_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_24_test_strategy_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_24_test_strategy_validator.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
 
 
 # ── REQ-16: Agent 06 wiring + VC coverage check ───────────────────────────────
@@ -274,3 +384,51 @@ class TestAgentSixAndVCCoverageREQ16:
             AGENT3_LOW, None, agent19_no_vc, AGENT21_PASS, AGENT23_PASS
         )
         assert verdict != "FAIL"
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "HIGH" in msg
+
+    def test_includes_scenario_count(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "5" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "Verdict: PASS" in msg
+
+    def test_fca_coverage_in_message(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "True" in msg
+
+    def test_no_gaps_shows_none(self):
+        msg = _build_trace_message("FSC-2417", AGENT3_HIGH, AGENT19_FULL, [], "PASS")
+        assert "['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", None, None, [], "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "strategy_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_strategy_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["strategy_concern"]["enum"] == [
+            "none", "insufficient_scenarios", "missing_fca_coverage", "no_test_data", "multiple"
+        ]

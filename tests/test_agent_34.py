@@ -6,9 +6,12 @@ import pytest
 
 from src.agents.testing.agent_34_defect_triage import (
     _build_severity_votes,
+    _build_triage_message,
     _compute_confidence,
     _infer_severity,
     _resolve_severity_votes,
+    _TRIAGE_TOOL_NAME,
+    _TRIAGE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -133,6 +136,34 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence(None, None, None, None, 10)
         assert score >= 20
 
+    def test_comprehensive_test_sources_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_PASS, AGENT28_CLEAN, AGENT31_PASS, AGENT37_SKIPPED, 0)
+        assert "comprehensive_test_sources" in signals
+
+    def test_comprehensive_test_sources_stores_count(self):
+        _, signals = _compute_confidence(AGENT27_PASS, AGENT28_CLEAN, AGENT31_PASS, AGENT37_SKIPPED, 0)
+        assert signals["comprehensive_test_sources"] == 4
+
+    def test_partial_test_sources_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_PASS, None, None, None, 0)
+        assert "partial_test_sources" in signals
+
+    def test_no_test_sources_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, 0)
+        assert "no_test_sources" in signals
+
+    def test_crt_execution_passed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_PASS, None, None, None, 0)
+        assert "crt_execution_passed" in signals
+
+    def test_crt_execution_failed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_FAIL, None, None, None, 0)
+        assert "crt_execution_failed" in signals
+
+    def test_no_defects_found_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT27_PASS, None, None, None, 0)
+        assert "no_defects_found" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -245,6 +276,37 @@ class TestAgentRun:
         assert result.agent_id == 34
         assert result.data["defect_verdict"] in ("PASS", "WARN", "FAIL")
 
+    async def test_escalated_when_no_upstream_data(self):
+        # base=60, no_test_sources→-12 = 48 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_34_defect_triage.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_NO_DEFECTS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
 
 # ── Severity voting unit tests ────────────────────────────────────────────────
 
@@ -263,6 +325,12 @@ class TestInferSeverity:
 
     def test_pass_with_count_still_p3(self):
         assert _infer_severity("PASS", 5) == "P3"
+
+    def test_warn_with_zero_count_produces_p3(self):
+        assert _infer_severity("WARN", 0) == "P3"
+
+    def test_warn_with_false_bool_produces_p3(self):
+        assert _infer_severity("WARN", False) == "P3"
 
 
 class TestBuildSeverityVotes:
@@ -289,6 +357,22 @@ class TestBuildSeverityVotes:
         assert len(votes) == 5
         assert all(v in ("P1", "P2", "P3", "P4") for v in votes.values())
 
+    def test_fca_gaps_produce_p2_fca_vote(self):
+        votes = _build_severity_votes(None, None, AGENT30_GAPS, None, None)
+        assert votes["fca_scenario"] == "P2"
+
+    def test_integrity_violations_produce_p2_financial_vote(self):
+        votes = _build_severity_votes(None, None, None, AGENT31_FAIL, None)
+        assert votes["financial"] == "P2"
+
+    def test_performance_fail_with_concern_produces_p1(self):
+        votes = _build_severity_votes(None, None, None, None, AGENT37_FAIL)
+        assert votes["performance"] == "P1"
+
+    def test_self_heal_review_required_produces_p3(self):
+        votes = _build_severity_votes(None, AGENT28_SUSPECT, None, None, None)
+        assert votes["self_heal"] == "P3"
+
 
 class TestResolveSeverityVotes:
     def test_any_p1_vote_forces_p1_final(self):
@@ -311,6 +395,12 @@ class TestResolveSeverityVotes:
         votes = {"crt": "P3", "fca_scenario": "P3", "financial": "P2", "performance": "P3", "self_heal": "P3"}
         severity, minimax_escalated = _resolve_severity_votes(votes)
         assert severity == "P3"
+        assert minimax_escalated is False
+
+    def test_p2_majority_wins_no_escalation(self):
+        votes = {"crt": "P2", "fca_scenario": "P2", "financial": "P2", "performance": "P3", "self_heal": "P3"}
+        severity, minimax_escalated = _resolve_severity_votes(votes)
+        assert severity == "P2"
         assert minimax_escalated is False
 
 
@@ -400,3 +490,64 @@ class TestCoalitionSeverityVoting:
 
         assert result.data["coalition_severity"] == "P3"
         assert result.data["coalition_dissent"] == []
+
+
+# ── Triage message unit tests ─────────────────────────────────────────────────
+
+class TestBuildTriageMessage:
+    def test_includes_story_id(self):
+        msg = _build_triage_message("FSC-2417", AGENT27_PASS, AGENT28_CLEAN, AGENT30_PASS, AGENT31_PASS, AGENT37_SKIPPED)
+        assert "FSC-2417" in msg
+
+    def test_includes_crt_verdict(self):
+        msg = _build_triage_message("FSC-2417", AGENT27_FAIL, None, None, None, None)
+        assert "FAIL" in msg
+
+    def test_includes_heal_verdict(self):
+        msg = _build_triage_message("FSC-2417", None, AGENT28_SUSPECT, None, None, None)
+        assert "REVIEW_REQUIRED" in msg
+
+    def test_includes_fca_verdict(self):
+        msg = _build_triage_message("FSC-2417", None, None, AGENT30_GAPS, None, None)
+        assert "WARN" in msg
+
+    def test_includes_regulatory_gaps(self):
+        msg = _build_triage_message("FSC-2417", None, None, AGENT30_GAPS, None, None)
+        assert "COBS 9 suitability" in msg
+
+    def test_includes_integrity_violations(self):
+        msg = _build_triage_message("FSC-2417", None, None, None, AGENT31_FAIL, None)
+        assert "integrity unconfirmed" in msg
+
+    def test_includes_performance_concern(self):
+        msg = _build_triage_message("FSC-2417", None, None, None, None, AGENT37_FAIL)
+        assert "governor_limit_breach" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_triage_message("FSC-2417", None, None, None, None, None)
+        assert _TRIAGE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_six_required_fields(self):
+        assert set(_TRIAGE_TOOL_SCHEMA["required"]) == {
+            "defects_found", "defect_count", "critical_defects",
+            "defect_verdict", "triage_complete", "narrative",
+        }
+
+    def test_narrative_is_string(self):
+        assert _TRIAGE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_defect_verdict_enum(self):
+        assert _TRIAGE_TOOL_SCHEMA["properties"]["defect_verdict"]["enum"] == ["PASS", "WARN", "FAIL"]
+
+    def test_defect_item_has_five_required_fields(self):
+        items = _TRIAGE_TOOL_SCHEMA["properties"]["defects_found"]["items"]
+        assert set(items["required"]) == {"id", "title", "severity", "owner", "source"}
+
+    def test_severity_enum_has_four_values(self):
+        items = _TRIAGE_TOOL_SCHEMA["properties"]["defects_found"]["items"]
+        assert items["properties"]["severity"]["enum"] == ["P1", "P2", "P3", "P4"]

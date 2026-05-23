@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_45_go_no_go import (
+    _build_trace_message,
     _compute_confidence,
     _make_decision,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -128,10 +131,20 @@ class TestMakeDecision:
         assert verdict == "GO"
 
     def test_multiple_failures_all_collected(self):
-        _, reasons, _, _, _, _ = _make_decision(None, 
+        _, reasons, _, _, _, _ = _make_decision(None,
             AGENT36_BLOCKED, AGENT39_BLOCKED, AGENT41_FAIL, AGENT43_FAIL, AGENT44_MISSING,
         )
         assert len(reasons) >= 4
+
+    def test_readiness_partial_does_not_block(self):
+        # PARTIAL readiness only triggers on "BLOCKED" — PARTIAL is allowed
+        agent39_partial = {"readiness_verdict": "PARTIAL", "readiness_blockers": []}
+        go, _, verdict, _, coalition_verdict, _ = _make_decision(
+            None, AGENT36_NOT_REQUIRED, agent39_partial, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert go is True
+        assert verdict == "GO"
+        assert coalition_verdict == "UNANIMOUS_GO"
 
 
 # ── Minimax loss analysis + coalition tests ───────────────────────────────────
@@ -196,6 +209,24 @@ class TestMinimaxAndCoalition:
         assert coalition_verdict == "DISSENT_NO_GO"
         assert "uat" in dissent
 
+    def test_readiness_blocked_maps_to_fca_audit_failure(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            None, AGENT36_NOT_REQUIRED, AGENT39_BLOCKED, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert any(m["loss_type"] == "FCA_AUDIT_FAILURE" for m in minimax_loss)
+
+    def test_integrity_failed_maps_to_metadata_corruption(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            None, AGENT36_NOT_REQUIRED, AGENT39_READY, AGENT41_FAIL, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert any(m["loss_type"] == "METADATA_CORRUPTION" for m in minimax_loss)
+
+    def test_uat_blocked_maps_to_stakeholder_sign_off(self):
+        _, _, _, minimax_loss, _, _ = _make_decision(
+            None, AGENT36_BLOCKED, AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE,
+        )
+        assert any(m["loss_type"] == "STAKEHOLDER_SIGN_OFF" for m in minimax_loss)
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -221,6 +252,34 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, None, False)
         assert score >= 20
+
+    def test_comprehensive_gate_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE, True)
+        assert "comprehensive_gate_data" in signals
+
+    def test_comprehensive_gate_data_stores_count(self):
+        _, signals = _compute_confidence(AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE, True)
+        assert signals["comprehensive_gate_data"] == 4
+
+    def test_partial_gate_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT39_READY, None, None, None, True)
+        assert "partial_gate_data" in signals
+
+    def test_partial_gate_data_stores_count(self):
+        _, signals = _compute_confidence(AGENT39_READY, AGENT41_PASS, None, None, True)
+        assert signals["partial_gate_data"] == 2
+
+    def test_no_gate_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, False)
+        assert "no_gate_data" in signals
+
+    def test_go_decision_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT39_READY, AGENT41_PASS, AGENT43_PASS, AGENT44_COMPLETE, True)
+        assert "go_decision" in signals
+
+    def test_no_go_decision_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, False)
+        assert "no_go_decision" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -338,6 +397,47 @@ class TestAgentRun:
         assert result.data["coalition_verdict"] == "DISSENT_NO_GO"
         assert len(result.data["minimax_loss_analysis"]) >= 1
 
+    async def test_escalated_when_no_gate_data(self):
+        # base=65, no_gate_data→-12=53, go_decision→+5=58 < 60 (all defaults → GO)
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_GO
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_GO
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_GO
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_45_go_no_go.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_GO
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
 
 # ── REQ-29: new tests ─────────────────────────────────────────────────────────
 
@@ -396,3 +496,49 @@ class TestREQ29CoalitionPendingGap:
         )
         assert coalition_verdict == "UNANIMOUS_GO"
         assert dissent == []
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, [], "GO")
+        assert "FSC-2417" in msg
+
+    def test_includes_go_flag(self):
+        msg = _build_trace_message("FSC-001", True, [], "GO")
+        assert "True" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", False, [], "NO_GO")
+        assert "NO_GO" in msg
+
+    def test_reasons_sentinel_when_no_reasons(self):
+        msg = _build_trace_message("FSC-001", True, [], "GO")
+        assert "['none']" in msg
+
+    def test_includes_reason_text_when_present(self):
+        reasons = ["Smoke tests FAILED: 3 failure(s)"]
+        msg = _build_trace_message("FSC-001", False, reasons, "NO_GO")
+        assert "Smoke tests FAILED" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", True, [], "GO")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "coordinator_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_coordinator_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["coordinator_concern"]["enum"] == [
+            "none", "integrity_issue", "smoke_failure",
+            "fca_evidence_incomplete", "uat_pending",
+        ]

@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_50_retrospective import (
+    _build_retro_message,
     _compute_confidence,
+    _RETRO_TOOL_NAME,
+    _RETRO_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -93,6 +96,26 @@ class TestConfidenceScoring:
     def test_returns_signals_dict(self):
         _, signals = _compute_confidence(AGENT23_DATA, AGENT33_DATA, AGENT45_DATA, "COMPLETE")
         assert isinstance(signals, dict)
+
+    def test_good_phase_coverage_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_DATA, AGENT33_DATA, AGENT45_DATA, "COMPLETE")
+        assert "good_phase_coverage" in signals
+
+    def test_good_phase_coverage_stores_count(self):
+        _, signals = _compute_confidence(AGENT23_DATA, AGENT33_DATA, AGENT45_DATA, "COMPLETE")
+        assert signals["good_phase_coverage"] == 3
+
+    def test_minimal_phase_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_DATA, None, None, "PARTIAL")
+        assert "minimal_phase_data" in signals
+
+    def test_no_phase_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, "PARTIAL")
+        assert "no_phase_data" in signals
+
+    def test_retro_complete_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_DATA, AGENT33_DATA, AGENT45_DATA, "COMPLETE")
+        assert "retro_complete" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -246,6 +269,37 @@ class TestAgentRun:
 
         assert isinstance(result.confidence.escalated, bool)
 
+    async def test_escalated_when_no_upstream_data(self):
+        # base=60, no_phase_data→-12=48, PARTIAL verdict→no delta → 48 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_PARTIAL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_PARTIAL
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+    async def test_what_includes_lesson_count(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_50_retrospective.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_RETRO_COMPLETE
+            result = await run(state)
+
+        assert "2" in result.what  # len(lessons_learned) == 2
+
     async def test_signals_propagated_to_data(self):
         state = initial_story_state("FSC-2417")
 
@@ -329,3 +383,62 @@ class TestREQ32CalibrationSignalsSchema:
             result = await run(state)
 
         assert result.data["calibration_signals"]["fca_evidence_complete"] is True
+
+
+# ── Retro message unit tests ───────────────────────────────────────────────────
+
+class TestBuildRetroMessage:
+    def test_includes_story_id(self):
+        msg = _build_retro_message("FSC-2417", None, None, None, None, None, None, None)
+        assert "FSC-2417" in msg
+
+    def test_includes_dev_verdict(self):
+        msg = _build_retro_message("FSC-001", AGENT23_DATA, None, None, None, None, None, None)
+        assert "PASS" in msg
+
+    def test_includes_coverage_pct(self):
+        msg = _build_retro_message("FSC-001", None, AGENT33_DATA, None, None, None, None, None)
+        assert "92.0" in msg
+
+    def test_includes_defect_count(self):
+        agent34 = {"defect_count": 3, "defect_verdict": "FAIL"}
+        msg = _build_retro_message("FSC-001", None, None, agent34, None, None, None, None)
+        assert "3" in msg
+
+    def test_go_decision_in_prompt(self):
+        msg = _build_retro_message("FSC-001", None, None, None, None, None, AGENT45_DATA, None)
+        assert "True" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_retro_message("FSC-001", None, None, None, None, None, None, None)
+        assert _RETRO_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_five_required_fields(self):
+        assert set(_RETRO_TOOL_SCHEMA["required"]) == {
+            "lessons_learned", "process_improvements", "calibration_signals",
+            "retrospective_verdict", "narrative",
+        }
+
+    def test_retrospective_verdict_enum_has_two_values(self):
+        assert _RETRO_TOOL_SCHEMA["properties"]["retrospective_verdict"]["enum"] == [
+            "COMPLETE", "PARTIAL",
+        ]
+
+    def test_narrative_is_string(self):
+        assert _RETRO_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_lessons_learned_items_have_three_required_fields(self):
+        items = _RETRO_TOOL_SCHEMA["properties"]["lessons_learned"]["items"]
+        assert set(items["required"]) == {"area", "finding", "recommendation"}
+
+    def test_calibration_signals_has_six_required_keys(self):
+        cal_required = set(_RETRO_TOOL_SCHEMA["properties"]["calibration_signals"]["required"])
+        assert cal_required == {
+            "coverage_above_threshold", "defect_count", "fca_evidence_complete",
+            "development_verdict_clean", "go_decision_reached", "production_healthy",
+        }

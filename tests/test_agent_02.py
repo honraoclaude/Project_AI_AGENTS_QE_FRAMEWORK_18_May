@@ -11,8 +11,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.refinement.agent_02_invest_quality import (
+    _build_user_message,
     _compute_confidence,
     _get_invest_score,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -153,6 +156,39 @@ AGENT1_DATA_LABEL = {
 }
 
 
+AGENT1_DATA_RICH = {
+    **AGENT1_DATA_SUITABILITY,
+    "description_word_count": 120,   # triggers description_rich signal (+5)
+}
+
+AGENT1_DATA_MANY_MISSING = {
+    **AGENT1_DATA_LABEL,
+    "missing_elements": ["acceptance_criteria", "error_scenarios", "edge_cases"],  # 3 → many_missing_elements (-8)
+}
+
+MOCK_EXTRACTION_MANY_BLOCKING = {
+    **MOCK_EXTRACTION_FAIL,
+    "blocking_issues": [
+        "No acceptance criteria.",
+        "No business value stated.",
+        "Vague scope — no FSC objects named.",
+    ],  # 3 → many_blocking_issues (+5)
+}
+
+MOCK_EXTRACTION_CONCERNS = {
+    # raw total = 84 → int(84*100/120) = 70 → PASS_WITH_CONCERNS range (65–79)
+    "independent_score": 14, "independent_rationale": "Minor dependency.",
+    "negotiable_score": 14,  "negotiable_rationale": "Partially specified.",
+    "valuable_score": 14,    "valuable_rationale": "Some value stated.",
+    "estimable_score": 14,   "estimable_rationale": "Objects partially named.",
+    "small_score": 14,       "small_rationale": "Fits sprint with effort.",
+    "testable_score": 14,    "testable_rationale": "Scenarios present but incomplete.",
+    "invest_verdict": "PASS_WITH_CONCERNS",
+    "improvement_suggestions": ["Add error scenarios."],
+    "blocking_issues": [],
+}
+
+
 # ── INVEST score normalisation unit tests (no LLM, no Jira) ──────────────────
 
 class TestInvestScoreNormalisation:
@@ -231,6 +267,87 @@ class TestConfidenceScoring:
         score, signals = _compute_confidence(AGENT1_DATA_SUITABILITY, borderline, invest_score)
         # invest_score = 96*100/120 = 80, margin = 0 → penalty -5
         assert signals.get("invest_margin") == 0
+
+    # C7 — invest_margin >= 15 (+10) stored value and delta never asserted
+    def test_margin_large_delta_is_ten_not_four(self):
+        # Use the same extraction for both calls so only invest_score changes.
+        # invest_score=45 → margin=35 ≥ 15 → +10 branch
+        # invest_score=85 → margin=5 ≥ 5 but < 15 → +4 branch
+        # All other signals (testable, blocking_issues, agent1) identical → diff == 6
+        score_large, _ = _compute_confidence(None, MOCK_EXTRACTION_PASS, 45)
+        score_moderate, _ = _compute_confidence(None, MOCK_EXTRACTION_PASS, 85)
+        assert score_large - score_moderate == 6
+
+    # C3 — description_rich (+5) never triggered (word_count=85 misses >= 100 threshold)
+    def test_description_rich_triggers_for_word_count_100_plus(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_PASS)
+        score_rich, signals_rich = _compute_confidence(AGENT1_DATA_RICH, MOCK_EXTRACTION_PASS, invest_score)
+        score_normal, _ = _compute_confidence(AGENT1_DATA_SUITABILITY, MOCK_EXTRACTION_PASS, invest_score)
+        assert signals_rich["description_rich"] == 120
+        assert score_rich - score_normal == 5
+
+    # C4 — many_missing_elements (-8) never triggered (AGENT1_DATA_LABEL has 2, needs >= 3)
+    def test_many_missing_elements_triggers_for_three_or_more(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_FAIL)
+        _, signals = _compute_confidence(AGENT1_DATA_MANY_MISSING, MOCK_EXTRACTION_FAIL, invest_score)
+        assert signals["many_missing_elements"] == 3
+
+    # C5 — many_blocking_issues (+5) never triggered (MOCK_EXTRACTION_FAIL has 2, needs >= 3)
+    def test_many_blocking_issues_triggers_for_three_or_more(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_MANY_BLOCKING)
+        _, signals = _compute_confidence(AGENT1_DATA_LABEL, MOCK_EXTRACTION_MANY_BLOCKING, invest_score)
+        assert signals["many_blocking_issues"] == 3
+
+    # C6 — testable middle range (6–13) produces no signal — never asserted
+    def test_testable_middle_range_stores_no_testable_signal(self):
+        mid = {**MOCK_EXTRACTION_PASS, "testable_score": 10}
+        invest_score = _get_invest_score(mid)
+        _, signals = _compute_confidence(AGENT1_DATA_SUITABILITY, mid, invest_score)
+        assert "testable_high" not in signals
+        assert "testable_low" not in signals
+
+    # H — signal stored values (observed values, not deltas)
+    def test_testable_high_stores_observed_score(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_PASS)
+        _, signals = _compute_confidence(AGENT1_DATA_SUITABILITY, MOCK_EXTRACTION_PASS, invest_score)
+        assert signals["testable_high"] == 18
+
+    def test_testable_low_stores_observed_score(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_FAIL)
+        _, signals = _compute_confidence(AGENT1_DATA_LABEL, MOCK_EXTRACTION_FAIL, invest_score)
+        assert signals["testable_low"] == 2
+
+    def test_ac_present_signal_stores_true(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_PASS)
+        _, signals = _compute_confidence(AGENT1_DATA_SUITABILITY, MOCK_EXTRACTION_PASS, invest_score)
+        assert signals["ac_present"] is True
+
+    def test_ac_absent_signal_stores_true(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_FAIL)
+        _, signals = _compute_confidence(AGENT1_DATA_LABEL, MOCK_EXTRACTION_FAIL, invest_score)
+        assert signals["ac_absent"] is True
+
+    def test_no_missing_elements_stores_zero(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_PASS)
+        _, signals = _compute_confidence(AGENT1_DATA_SUITABILITY, MOCK_EXTRACTION_PASS, invest_score)
+        assert signals["no_missing_elements"] == 0
+
+    def test_some_missing_elements_stores_count(self):
+        # AGENT1_DATA_LABEL has 2 missing elements → some_missing_elements
+        invest_score = _get_invest_score(MOCK_EXTRACTION_FAIL)
+        _, signals = _compute_confidence(AGENT1_DATA_LABEL, MOCK_EXTRACTION_FAIL, invest_score)
+        assert signals["some_missing_elements"] == 2
+
+    def test_agent1_unavailable_stores_true(self):
+        invest_score = _get_invest_score(MOCK_EXTRACTION_PASS)
+        _, signals = _compute_confidence(None, MOCK_EXTRACTION_PASS, invest_score)
+        assert signals["agent1_unavailable"] is True
+
+    def test_description_sparse_stores_word_count(self):
+        # AGENT1_DATA_LABEL has description_word_count=15 → description_sparse
+        invest_score = _get_invest_score(MOCK_EXTRACTION_FAIL)
+        _, signals = _compute_confidence(AGENT1_DATA_LABEL, MOCK_EXTRACTION_FAIL, invest_score)
+        assert signals["description_sparse"] == 15
 
 
 # ── Integration tests — full agent run with mocked LLM and Jira ───────────────
@@ -393,3 +510,228 @@ class TestAgentRun:
 
         assert result.agent_id == 2
         assert result.data["agent1_available"] is False
+
+    # H — data dict keys never tested
+    async def test_data_contains_invest_total_raw(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES_FULL
+            ml.return_value = MOCK_EXTRACTION_PASS
+            result = await run(state)
+
+        assert result.data["invest_total_raw"] == 102  # 18+16+20+16+14+18
+
+    async def test_data_contains_dimension_rationales(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES_FULL
+            ml.return_value = MOCK_EXTRACTION_PASS
+            result = await run(state)
+
+        rationales = result.data["dimension_rationales"]
+        assert isinstance(rationales, dict)
+        assert set(rationales.keys()) == {"independent", "negotiable", "valuable", "estimable", "small", "testable"}
+        assert all(isinstance(v, str) for v in rationales.values())
+
+    async def test_data_contains_ac_clause_count(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES_FULL
+            ml.return_value = MOCK_EXTRACTION_PASS
+            result = await run(state)
+
+        assert result.data["ac_clause_count"] == len(AC_CLAUSES_FULL)
+
+    async def test_high_confidence_story_is_not_escalated(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+            patch("src.agents.refinement.agent_02_invest_quality.settings") as mock_settings,
+        ):
+            mock_settings.default_model = "claude-sonnet-4-6"
+            mock_settings.confidence_escalation_threshold = 60
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES_FULL
+            ml.return_value = MOCK_EXTRACTION_PASS
+            result = await run(state)
+
+        assert result.confidence.escalated is False
+
+    async def test_low_confidence_story_is_escalated(self):
+        state = initial_story_state("FSC-2500")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_LABEL}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+            patch("src.agents.refinement.agent_02_invest_quality.settings") as mock_settings,
+        ):
+            mock_settings.default_model = "claude-sonnet-4-6"
+            mock_settings.confidence_escalation_threshold = 99  # above any achievable score
+            ms.return_value = STORY_LABEL_CHANGE
+            ma.return_value = []
+            ml.return_value = MOCK_EXTRACTION_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_pass_with_concerns_verdict_flows_through(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_SUITABILITY}
+
+        with (
+            patch("src.agents.refinement.agent_02_invest_quality.get_story", new_callable=AsyncMock) as ms,
+            patch("src.agents.refinement.agent_02_invest_quality.get_acceptance_criteria", new_callable=AsyncMock) as ma,
+            patch("src.agents.refinement.agent_02_invest_quality.call_with_tool", new_callable=AsyncMock) as ml,
+        ):
+            ms.return_value = STORY_SUITABILITY
+            ma.return_value = AC_CLAUSES_FULL
+            ml.return_value = MOCK_EXTRACTION_CONCERNS
+            result = await run(state)
+
+        assert result.data["invest_verdict"] == "PASS_WITH_CONCERNS"
+
+
+# ── Prompt content tests ──────────────────────────────────────────────────────
+
+class TestPromptContent:
+    """
+    Tests that _build_user_message() produces the prompt Sonnet actually receives.
+    If a field is missing from the prompt, Sonnet has no signal for that dimension.
+    """
+
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_status(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert "Sprint Ready" in msg
+
+    def test_prompt_includes_priority(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert "High" in msg
+
+    def test_prompt_shows_empty_when_description_is_none(self):
+        story = {**STORY_LABEL_CHANGE, "description": None}
+        msg = _build_user_message(story, [], None)
+        assert "(empty)" in msg
+
+    def test_prompt_ac_present_shows_scenario_structure(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert "ACCEPTANCE CRITERIA:" in msg
+        assert "Scenario" in msg
+        assert "Given" in msg
+        assert "Then" in msg
+
+    def test_prompt_ac_absent_shows_none_provided(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None)
+        assert "None provided." in msg
+
+    def test_prompt_empty_components_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None)
+        assert "COMPONENTS: None" in msg
+
+    def test_prompt_empty_labels_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, [], None)
+        assert "LABELS: None" in msg
+
+    def test_prompt_includes_agent1_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert "AGENT 1 PRE-ANALYSIS" in msg
+        assert "Wealth Adviser" in msg  # persona
+        assert AGENT1_DATA_SUITABILITY["goal"] in msg
+
+    def test_prompt_agent1_section_absent_when_no_agent1_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, None)
+        assert "AGENT 1 PRE-ANALYSIS" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        # If the tool instruction is missing, call_with_tool() raises RuntimeError.
+        msg = _build_user_message(STORY_SUITABILITY, AC_CLAUSES_FULL, AGENT1_DATA_SUITABILITY)
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    """
+    Tests that _TOOL_SCHEMA enforces the correct structure.
+    Claude validates tool inputs against this schema — if a field is
+    missing or wrong-typed here, the LLM can produce malformed output
+    that downstream agents silently misread.
+    """
+
+    _SCORE_FIELDS = [
+        "independent_score", "negotiable_score", "valuable_score",
+        "estimable_score", "small_score", "testable_score",
+    ]
+    _RATIONALE_FIELDS = [
+        "independent_rationale", "negotiable_rationale", "valuable_rationale",
+        "estimable_rationale", "small_rationale", "testable_rationale",
+    ]
+
+    def test_all_fifteen_fields_are_required(self):
+        required = set(_TOOL_SCHEMA["required"])
+        expected = {
+            "independent_score", "independent_rationale",
+            "negotiable_score",  "negotiable_rationale",
+            "valuable_score",    "valuable_rationale",
+            "estimable_score",   "estimable_rationale",
+            "small_score",       "small_rationale",
+            "testable_score",    "testable_rationale",
+            "invest_verdict", "improvement_suggestions", "blocking_issues",
+        }
+        assert required == expected, f"Required fields mismatch: {required ^ expected}"
+
+    def test_score_fields_are_integers_with_bounds(self):
+        for field in self._SCORE_FIELDS:
+            props = _TOOL_SCHEMA["properties"][field]
+            assert props["type"] == "integer", f"{field} must be integer"
+            assert props["minimum"] == 0,  f"{field} minimum must be 0"
+            assert props["maximum"] == 20, f"{field} maximum must be 20"
+
+    def test_rationale_fields_are_strings(self):
+        for field in self._RATIONALE_FIELDS:
+            assert _TOOL_SCHEMA["properties"][field]["type"] == "string", f"{field} must be string"
+
+    def test_invest_verdict_is_enum_with_three_values(self):
+        enum = _TOOL_SCHEMA["properties"]["invest_verdict"]["enum"]
+        assert set(enum) == {"PASS", "PASS_WITH_CONCERNS", "FAIL"}
+
+    def test_improvement_suggestions_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["improvement_suggestions"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_blocking_issues_is_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["blocking_issues"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"

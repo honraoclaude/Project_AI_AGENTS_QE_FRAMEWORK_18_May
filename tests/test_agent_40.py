@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_40_release_composer import (
+    _build_trace_message,
     _compose_release,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -103,6 +106,25 @@ class TestComposeRelease:
         _, _, _, _, verdict = _compose_release("FSC-001", None, None, None, None)
         assert verdict == "PARTIAL"
 
+    def test_regulated_non_apex_non_object_gives_minor(self):
+        # ValidationRule is in _REGULATED_COMPONENT_TYPES but not apex/object → MINOR via has_regulated
+        agent18_validation = {"component_types": {"ValidationRule": 2, "CustomLabel": 1}}
+        _, _, release_type, _, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, agent18_validation)
+        assert release_type == "MINOR"
+
+    def test_detected_objects_fallback_when_no_files_and_no_types(self):
+        # no component_types, changed_files_count=0 → falls back to len(detected_objects)
+        agent13_no_files = {"changed_files_count": 0, "detected_objects": ["financialaccount", "suitability__c"]}
+        _, count, _, _, _ = _compose_release("FSC-001", None, agent13_no_files, None, None)
+        assert count == 2
+
+    def test_external_service_not_duplicated_when_already_in_summary(self):
+        # ExternalService already in component_types → guard prevents double-counting
+        agent18_with_ext = {"component_types": {"ApexClass": 1, "ExternalService": 1}}
+        _, count, _, summary, _ = _compose_release("FSC-001", AGENT8_EXT_DEPS, AGENT13_RICH, None, agent18_with_ext)
+        assert summary["ExternalService"] == 1
+        assert count == 2
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -123,6 +145,30 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, 0)
         assert score >= 20
+
+    def test_metadata_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_RICH, None, 4)
+        assert "metadata_available" in signals
+
+    def test_no_metadata_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, 0)
+        assert "no_metadata" in signals
+
+    def test_component_attribution_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_RICH, AGENT18_APEX, 4)
+        assert "component_attribution_available" in signals
+
+    def test_no_components_found_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, 0)
+        assert "no_components_found" in signals
+
+    def test_large_change_set_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT13_RICH, AGENT18_APEX, 7)
+        assert "large_change_set" in signals
+
+    def test_large_change_set_stores_count(self):
+        _, signals = _compute_confidence(AGENT13_RICH, AGENT18_APEX, 7)
+        assert signals["large_change_set"] == 7
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -178,6 +224,47 @@ class TestAgentRun:
 
         assert result.model_used == "claude-haiku-4-5-20251001"
 
+    async def test_escalated_when_no_metadata_and_no_components(self):
+        # base=60, no_metadata→-10=50, no_components_found→-8=42 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_40_release_composer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PARTIAL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_40_release_composer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PARTIAL
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_40_release_composer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PARTIAL
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_40_release_composer.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PARTIAL
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
 
 # ── REQ-25: new tests ─────────────────────────────────────────────────────────
 
@@ -222,3 +309,67 @@ class TestREQ25ExternalDepsInSummary:
     def test_no_external_deps_no_external_service_key(self):
         _, _, _, summary, _ = _compose_release("FSC-001", None, AGENT13_RICH, None, AGENT18_APEX)
         assert "ExternalService" not in summary
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", "FSC-2417-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED")
+        assert "FSC-2417" in msg
+
+    def test_includes_release_name(self):
+        msg = _build_trace_message("FSC-2417", "FSC-2417-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED")
+        assert "FSC-2417-minor-release" in msg
+
+    def test_includes_component_count(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-minor-release", 7, "MINOR", {"ApexClass": 7}, "COMPOSED")
+        assert "7" in msg
+
+    def test_includes_release_type(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED")
+        assert "MINOR" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED")
+        assert "COMPOSED" in msg
+
+    def test_external_deps_line_present_when_true(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED",
+                                   has_external_deps=True)
+        assert "Named Credentials" in msg
+
+    def test_format_violations_line_present_when_violations_exist(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-patch-release", 0, "PATCH", {}, "FAILED",
+                                   format_violations=["classes/MyClass.cls: missing -meta.xml"])
+        assert "SFDX format violations" in msg
+
+    def test_no_components_shows_none_sentinel(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-patch-release", 0, "PATCH", {}, "PARTIAL")
+        assert "(none identified)" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", "FSC-001-minor-release", 4, "MINOR", {"ApexClass": 4}, "COMPOSED")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "composer_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_composer_concern_enum_has_six_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["composer_concern"]["enum"] == [
+            "none", "no_components", "regulated_components_present",
+            "large_change_set", "metadata_missing", "sfdx_format_invalid",
+        ]
+
+    def test_composer_verdict_enum_has_three_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["composer_verdict"]["enum"] == [
+            "COMPOSED", "PARTIAL", "FAILED",
+        ]

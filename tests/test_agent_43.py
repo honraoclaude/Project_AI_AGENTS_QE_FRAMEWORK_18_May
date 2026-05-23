@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.release.agent_43_smoke_on_staging import (
+    _build_trace_message,
     _compute_confidence,
     _run_smoke_tests,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -96,6 +99,27 @@ class TestRunSmokeTests:
         assert suite == "SMOKE"
         assert count == 5
 
+    def test_suite_type_full_alone_gives_full_suite(self):
+        # regression_risk=LOW but suite_type=FULL → suite_type arm fires independently
+        agent32 = {"regression_risk_level": "LOW", "recommended_regression_suite": "FULL"}
+        _, count, _, suite, _ = _run_smoke_tests(agent32, AGENT42_PASS)
+        assert suite == "FULL"
+        assert count == 20
+
+    def test_regression_risk_high_alone_gives_full_suite(self):
+        # regression_risk=HIGH but suite_type=SMOKE → regression_risk arm fires independently
+        agent32 = {"regression_risk_level": "HIGH", "recommended_regression_suite": "SMOKE"}
+        _, count, _, suite, _ = _run_smoke_tests(agent32, AGENT42_PASS)
+        assert suite == "FULL"
+        assert count == 20
+
+    def test_suite_type_regression_alone_gives_regression_suite(self):
+        # regression_risk=LOW but suite_type=REGRESSION → suite_type MEDIUM arm fires independently
+        agent32 = {"regression_risk_level": "LOW", "recommended_regression_suite": "REGRESSION"}
+        _, count, _, suite, _ = _run_smoke_tests(agent32, AGENT42_PASS)
+        assert suite == "REGRESSION"
+        assert count == 10
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -121,6 +145,26 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, False)
         assert score >= 20
+
+    def test_dry_run_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT42_PASS, True)
+        assert "dry_run_data_available" in signals
+
+    def test_no_dry_run_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, False)
+        assert "no_dry_run_data" in signals
+
+    def test_regression_risk_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT32_LOW, AGENT42_PASS, True)
+        assert "regression_risk_data" in signals
+
+    def test_smoke_tests_passed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT32_LOW, AGENT42_PASS, True)
+        assert "smoke_tests_passed" in signals
+
+    def test_smoke_tests_failed_or_skipped_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, False)
+        assert "smoke_tests_failed_or_skipped" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -201,3 +245,89 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=60, no_dry_run_data→-10=50, smoke_tests_failed_or_skipped→-5=45 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_43_smoke_on_staging.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_43_smoke_on_staging.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_43_smoke_on_staging.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_43_smoke_on_staging.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, 5, 0, "SMOKE", "PASS")
+        assert "FSC-2417" in msg
+
+    def test_includes_suite(self):
+        msg = _build_trace_message("FSC-001", True, 20, 0, "FULL", "PASS")
+        assert "FULL" in msg
+
+    def test_includes_test_count(self):
+        msg = _build_trace_message("FSC-001", True, 10, 0, "REGRESSION", "PASS")
+        assert "10" in msg
+
+    def test_includes_failed_count(self):
+        msg = _build_trace_message("FSC-001", False, 5, 2, "SMOKE", "FAIL")
+        assert "2" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-001", False, 0, 0, "SMOKE", "SKIPPED")
+        assert "SKIPPED" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-001", True, 5, 0, "SMOKE", "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "smoke_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_smoke_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["smoke_concern"]["enum"] == [
+            "none", "smoke_failures", "full_suite_failures",
+            "dry_run_not_done", "regression_risk_unresolved",
+        ]

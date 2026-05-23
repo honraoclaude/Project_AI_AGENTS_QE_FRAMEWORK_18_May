@@ -8,9 +8,12 @@ import pytest
 
 from src.agents.monitoring.agent_52_severity_calibration import (
     _AGENT_BASE_MAP,
+    _CALIB_TOOL_NAME,
+    _CALIB_TOOL_SCHEMA,
     _compute_adjustments,
     _compute_confidence,
     _derive_verdict,
+    run,
     run_scheduled,
 )
 from src.core.schemas import initial_story_state
@@ -104,6 +107,18 @@ class TestComputeAdjustments:
         adjustments = _compute_adjustments(rows)
         assert adjustments[0]["current_base"] == 60  # default
 
+    def test_exact_reduce_threshold_gives_no_change(self):
+        # fp_rate == 0.15 exactly — NOT > 0.15 → falls to else → delta=0
+        rows = [_signal_row(1, total=20, fp=3)]  # 3/20 = 15% exactly
+        adjustments = _compute_adjustments(rows)
+        assert adjustments[0]["adjustment"] == 0
+
+    def test_exact_increase_threshold_gives_no_change(self):
+        # fp_rate == 0.05 exactly — NOT < 0.05 → falls to else → delta=0
+        rows = [_signal_row(1, total=20, fp=1)]  # 1/20 = 5% exactly
+        adjustments = _compute_adjustments(rows)
+        assert adjustments[0]["adjustment"] == 0
+
 
 # ── _derive_verdict tests ─────────────────────────────────────────────────────
 
@@ -153,6 +168,26 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(0, 0)
         assert score >= 20
+
+    def test_rich_signal_volume_key_in_signals(self):
+        _, signals = _compute_confidence(50, 0)
+        assert "rich_signal_volume" in signals
+
+    def test_adequate_signal_volume_key_in_signals(self):
+        _, signals = _compute_confidence(15, 0)
+        assert "adequate_signal_volume" in signals
+
+    def test_no_signals_key_in_signals(self):
+        _, signals = _compute_confidence(0, 0)
+        assert "no_signals" in signals
+
+    def test_sparse_signals_key_in_signals(self):
+        _, signals = _compute_confidence(3, 0)
+        assert "sparse_signals" in signals
+
+    def test_adjustments_made_key_in_signals(self):
+        _, signals = _compute_confidence(20, 2)
+        assert "adjustments_made" in signals
 
 
 # ── _AGENT_BASE_MAP completeness ──────────────────────────────────────────────
@@ -262,6 +297,86 @@ class TestRunScheduled:
             result = await run_scheduled()
 
         assert isinstance(result.data["threshold_adjustments"], list)
+
+    async def test_adjusted_verdict_specifically_with_high_fp(self):
+        # Agent 1 has 20% FP > 15% threshold → ADJUSTED, not NO_CHANGE
+        with patch("src.agents.monitoring.agent_52_severity_calibration._fetch_signal_summary",
+                   new_callable=AsyncMock) as mock_fetch, \
+             patch("src.agents.monitoring.agent_52_severity_calibration.call_with_tool",
+                   new_callable=AsyncMock) as mock_llm:
+            mock_fetch.return_value = [_signal_row(1, total=20, fp=4)]
+            mock_llm.return_value = MOCK_NARRATIVE
+            result = await run_scheduled()
+
+        assert result.data["calibration_verdict"] == "ADJUSTED"
+
+    async def test_escalated_when_no_signals(self):
+        # base=70, no_signals→-20=50, agents_adjusted=0→no bonus → 50 < 60
+        with patch("src.agents.monitoring.agent_52_severity_calibration._fetch_signal_summary",
+                   new_callable=AsyncMock) as mock_fetch, \
+             patch("src.agents.monitoring.agent_52_severity_calibration.call_with_tool",
+                   new_callable=AsyncMock) as mock_llm:
+            mock_fetch.return_value = ROWS_EMPTY
+            mock_llm.return_value = MOCK_NARRATIVE
+            result = await run_scheduled()
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_verdict(self):
+        with patch("src.agents.monitoring.agent_52_severity_calibration._fetch_signal_summary",
+                   new_callable=AsyncMock) as mock_fetch, \
+             patch("src.agents.monitoring.agent_52_severity_calibration.call_with_tool",
+                   new_callable=AsyncMock) as mock_llm:
+            mock_fetch.return_value = ROWS_EMPTY
+            mock_llm.return_value = MOCK_NARRATIVE
+            result = await run_scheduled()
+
+        assert "INSUFFICIENT_DATA" in result.what
+
+    async def test_signals_and_key_insight_in_data(self):
+        with patch("src.agents.monitoring.agent_52_severity_calibration._fetch_signal_summary",
+                   new_callable=AsyncMock) as mock_fetch, \
+             patch("src.agents.monitoring.agent_52_severity_calibration.call_with_tool",
+                   new_callable=AsyncMock) as mock_llm:
+            mock_fetch.return_value = ROWS_SUFFICIENT
+            mock_llm.return_value = MOCK_NARRATIVE
+            result = await run_scheduled()
+
+        assert isinstance(result.data["signals"], dict)
+        assert "key_insight" in result.data
+
+
+# ── run(state) entry point ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestAgentRun:
+    async def test_run_state_returns_agent_52_result(self):
+        from src.core.schemas import initial_story_state
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_52_severity_calibration._fetch_signal_summary",
+                   new_callable=AsyncMock) as mock_fetch, \
+             patch("src.agents.monitoring.agent_52_severity_calibration.call_with_tool",
+                   new_callable=AsyncMock) as mock_llm:
+            mock_fetch.return_value = ROWS_SUFFICIENT
+            mock_llm.return_value = MOCK_NARRATIVE
+            result = await run(state)
+
+        assert result.agent_id == 52
+        assert result.agent_name == "Severity Calibration Agent"
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_CALIB_TOOL_SCHEMA["required"]) == {"calibration_summary", "key_insight"}
+
+    def test_calibration_summary_is_string(self):
+        assert _CALIB_TOOL_SCHEMA["properties"]["calibration_summary"]["type"] == "string"
+
+    def test_key_insight_is_string(self):
+        assert _CALIB_TOOL_SCHEMA["properties"]["key_insight"]["type"] == "string"
 
 
 # ── REQ-33: _AGENT_BASE_MAP sync test ────────────────────────────────────────

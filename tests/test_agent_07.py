@@ -4,7 +4,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.agents.refinement.agent_07_data_need import _compute_confidence, run
+from src.agents.refinement.agent_07_data_need import (
+    _build_user_message,
+    _compute_confidence,
+    _TOOL_NAME,
+    _TOOL_SCHEMA,
+    run,
+)
 from src.core.schemas import initial_story_state
 
 STORY_SUITABILITY = {
@@ -94,6 +100,23 @@ MOCK_DATA_NEED_COMPLEX = {
     ],
 }
 
+AGENT1_DATA_TWO_OBJECTS = {**AGENT1_DATA_RICH, "fsc_objects": ["Suitability__c", "RiskProfile__c"]}
+AGENT1_DATA_VERY_RICH = {**AGENT1_DATA_RICH, "description_word_count": 120}
+
+STORY_LABEL_CHANGE = {
+    "story_id": "FSC-2500",
+    "summary": "Update button label",
+    "description": "Change the Save button to Submit.",
+    "status": "Sprint Ready",
+    "issue_type": "Story",
+    "priority": "Low",
+    "labels": [],
+    "components": [],
+    "assignee": None,
+    "reporter": "po@firm.com",
+}
+STORY_NO_DESCRIPTION = {**STORY_LABEL_CHANGE, "story_id": "FSC-2501", "description": None}
+
 MOCK_DATA_NEED_MINIMAL = {
     "required_records": [
         {
@@ -148,6 +171,52 @@ class TestConfidenceScoring:
         no_sensitive = {**MOCK_DATA_NEED_COMPLEX, "sensitive_data_present": False}
         score_without, _ = _compute_confidence(AGENT1_DATA_RICH, no_sensitive)
         assert score_with > score_without
+
+    def test_fsc_objects_present_signal_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_TWO_OBJECTS, MOCK_DATA_NEED_COMPLEX)
+        assert "fsc_objects_present" in signals
+        assert signals["fsc_objects_present"] == 2
+
+    def test_description_rich_signal_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_VERY_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert "description_rich" in signals
+        assert signals["description_rich"] == 120
+
+    def test_volume_complexity_mismatch_signal_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_SPARSE, MOCK_DATA_NEED_COMPLEX)
+        assert "volume_complexity_mismatch" in signals
+
+    def test_fsc_objects_rich_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert "fsc_objects_rich" in signals
+        assert signals["fsc_objects_rich"] == 4
+
+    def test_fsc_objects_absent_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_SPARSE, MOCK_DATA_NEED_MINIMAL)
+        assert "fsc_objects_absent" in signals
+        assert signals["fsc_objects_absent"] == 0
+
+    def test_description_moderate_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert "description_moderate" in signals
+
+    def test_description_sparse_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_SPARSE, MOCK_DATA_NEED_MINIMAL)
+        assert "description_sparse" in signals
+
+    def test_dependency_chain_found_stores_count(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert signals["dependency_chain_found"] == 5
+
+    def test_sensitive_data_identified_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert "sensitive_data_identified" in signals
+        assert signals["sensitive_data_identified"] is True
+
+    def test_volume_complexity_aligned_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT1_DATA_RICH, MOCK_DATA_NEED_COMPLEX)
+        assert "volume_complexity_aligned" in signals
+        assert signals["volume_complexity_aligned"] is True
 
 
 @pytest.mark.asyncio
@@ -212,6 +281,75 @@ class TestAgentRun:
 
         assert result.agent_id == 7
 
+    async def test_no_context_causes_escalation(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_MINIMAL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_RICH}
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_data_volume_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_RICH}
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX
+            result = await run(state)
+
+        assert result.data["data_volume"] == "complex"
+
+    async def test_factory_classes_recommended_is_list(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_RICH}
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX
+            result = await run(state)
+
+        assert isinstance(result.data["factory_classes_recommended"], list)
+
+    async def test_signals_key_in_data_is_dict(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["1"] = {"data": AGENT1_DATA_RICH}
+
+        with (
+            patch("src.agents.refinement.agent_07_data_need.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_07_data_need.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_llm.return_value = MOCK_DATA_NEED_COMPLEX
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
 
 # ── REQ-05: fca_context_available + defensive default tests ──────────────────
 
@@ -275,3 +413,101 @@ class TestFcaContextAvailableREQ05:
             result = await run(state)
 
         assert result.data["data_isolation_strategy"] == "per_class_setup"
+
+
+# ── Tests: prompt content ─────────────────────────────────────────────────────
+
+class TestPromptContent:
+    def test_prompt_includes_story_id(self):
+        msg = _build_user_message(STORY_SUITABILITY, AGENT1_DATA_RICH)
+        assert "FSC-2417" in msg
+
+    def test_prompt_includes_summary(self):
+        msg = _build_user_message(STORY_SUITABILITY, AGENT1_DATA_RICH)
+        assert STORY_SUITABILITY["summary"] in msg
+
+    def test_prompt_includes_components(self):
+        msg = _build_user_message(STORY_SUITABILITY, AGENT1_DATA_RICH)
+        assert "COMPONENTS:" in msg
+
+    def test_prompt_empty_components_renders_as_none(self):
+        msg = _build_user_message(STORY_LABEL_CHANGE, AGENT1_DATA_RICH)
+        assert "COMPONENTS: None" in msg
+
+    def test_prompt_empty_description_shows_empty(self):
+        msg = _build_user_message(STORY_NO_DESCRIPTION, AGENT1_DATA_RICH)
+        assert "(empty)" in msg
+
+    def test_prompt_includes_agent1_section_when_present(self):
+        msg = _build_user_message(STORY_SUITABILITY, AGENT1_DATA_RICH)
+        assert "AGENT 1 — STORY INTENT:" in msg
+        assert "Story Summary:" in msg
+
+    def test_prompt_agent1_section_absent_when_no_agent1_data(self):
+        msg = _build_user_message(STORY_SUITABILITY, None)
+        assert "AGENT 1 — STORY INTENT:" not in msg
+
+    def test_prompt_ends_with_tool_instruction(self):
+        msg = _build_user_message(STORY_SUITABILITY, AGENT1_DATA_RICH)
+        assert _TOOL_NAME in msg
+        assert msg.strip().endswith("assessment.")
+
+
+# ── Tests: schema contract ────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_tool_schema_has_nine_required_fields(self):
+        expected = {
+            "required_records",
+            "data_isolation_strategy",
+            "sensitive_data_present",
+            "sensitive_data_fields",
+            "factory_classes_recommended",
+            "data_dependencies_ordered",
+            "data_volume",
+            "risks",
+            "fca_context_available",
+        }
+        assert set(_TOOL_SCHEMA["required"]) == expected
+
+    def test_required_records_is_array(self):
+        assert _TOOL_SCHEMA["properties"]["required_records"]["type"] == "array"
+
+    def test_record_schema_has_four_required_fields(self):
+        record_schema = _TOOL_SCHEMA["properties"]["required_records"]["items"]
+        expected = {"object_api_name", "min_record_count", "key_field_values", "setup_method"}
+        assert set(record_schema["required"]) == expected
+
+    def test_setup_method_enum_has_four_values(self):
+        record_schema = _TOOL_SCHEMA["properties"]["required_records"]["items"]
+        assert record_schema["properties"]["setup_method"]["enum"] == [
+            "TestSetup", "TestFactory", "StaticData", "MockData"
+        ]
+
+    def test_min_record_count_has_minimum_one(self):
+        record_schema = _TOOL_SCHEMA["properties"]["required_records"]["items"]
+        assert record_schema["properties"]["min_record_count"]["minimum"] == 1
+
+    def test_data_isolation_strategy_enum_has_three_values(self):
+        assert _TOOL_SCHEMA["properties"]["data_isolation_strategy"]["enum"] == [
+            "per_test_setup_teardown", "per_class_setup", "shared_org_data"
+        ]
+
+    def test_data_volume_enum_has_three_values(self):
+        assert _TOOL_SCHEMA["properties"]["data_volume"]["enum"] == ["minimal", "moderate", "complex"]
+
+    def test_sensitive_data_present_is_boolean(self):
+        assert _TOOL_SCHEMA["properties"]["sensitive_data_present"]["type"] == "boolean"
+
+    def test_fca_context_available_is_boolean(self):
+        assert _TOOL_SCHEMA["properties"]["fca_context_available"]["type"] == "boolean"
+
+    def test_sensitive_data_fields_is_array_of_strings(self):
+        prop = _TOOL_SCHEMA["properties"]["sensitive_data_fields"]
+        assert prop["type"] == "array"
+        assert prop["items"]["type"] == "string"
+
+    def test_risks_is_array_of_strings(self):
+        prop = _TOOL_SCHEMA["properties"]["risks"]
+        assert prop["type"] == "array"
+        assert prop["items"]["type"] == "string"

@@ -11,7 +11,10 @@ import pytest
 
 from src.agents.development.agent_11_branch_tracer import (
     _analyse_branch,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -125,6 +128,10 @@ class TestBranchAnalysis:
         assert age == 0
         assert found is True
 
+    def test_empty_created_date_gives_zero_age(self):
+        _, _, _, _, age = _analyse_branch(BRANCH_NOT_FOUND, "FSC-2417")
+        assert age == 0
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -164,6 +171,34 @@ class TestConfidenceScoring:
     def test_branch_not_found_signal_recorded(self):
         _, signals = _compute_confidence(BRANCH_NOT_FOUND, False, False, False, False)
         assert "branch_not_found" in signals
+
+    def test_branch_found_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_VALID, True, True, True, False)
+        assert "branch_found" in signals
+
+    def test_naming_convention_valid_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_VALID, True, True, True, False)
+        assert "naming_convention_valid" in signals
+
+    def test_naming_convention_invalid_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_BAD_NAME, True, False, False, False)
+        assert "naming_convention_invalid" in signals
+
+    def test_story_id_in_branch_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_VALID, True, True, True, False)
+        assert "story_id_in_branch" in signals
+
+    def test_story_id_missing_from_branch_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_NO_STORY_ID, True, True, False, False)
+        assert "story_id_missing_from_branch" in signals
+
+    def test_commit_sha_present_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_VALID, True, True, True, False)
+        assert "commit_sha_present" in signals
+
+    def test_branch_stale_key_in_signals(self):
+        _, signals = _compute_confidence(BRANCH_STALE, True, True, True, True)
+        assert "branch_stale" in signals
 
 
 # ── Integration tests — full agent run ───────────────────────────────────────
@@ -253,3 +288,114 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_branch_not_found_causes_escalation(self):
+        # branch_not_found (-20): base=65-20=45 < 60 → escalated
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_11_branch_tracer.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_copado,
+            patch("src.agents.development.agent_11_branch_tracer.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_copado.return_value = BRANCH_NOT_FOUND
+            mock_haiku.return_value = MOCK_TRACE_FAIL
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_11_branch_tracer.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_copado,
+            patch("src.agents.development.agent_11_branch_tracer.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_copado.return_value = BRANCH_VALID
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_11_branch_tracer.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_copado,
+            patch("src.agents.development.agent_11_branch_tracer.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_copado.return_value = BRANCH_VALID
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_11_branch_tracer.get_branch_for_story",
+                  new_callable=AsyncMock) as mock_copado,
+            patch("src.agents.development.agent_11_branch_tracer.call_with_tool",
+                  new_callable=AsyncMock) as mock_haiku,
+        ):
+            mock_copado.return_value = BRANCH_VALID
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message tests ───────────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "FSC-2417" in msg
+
+    def test_includes_branch_name_when_present(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "feature/FSC-2417-suitability-assessment" in msg
+
+    def test_shows_none_found_when_no_branch(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_NOT_FOUND, False, False, False, 0)
+        assert "(none found)" in msg
+
+    def test_includes_commit_sha_when_present(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "a1b2c3d4e5f6" in msg
+
+    def test_includes_branch_found_status(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "Branch found: True" in msg
+
+    def test_includes_naming_convention_hint(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "feature|bugfix|hotfix" in msg
+
+    def test_includes_branch_age(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert "Branch age (days):" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", BRANCH_VALID, True, True, True, 8)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "traceability_risk"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_traceability_risk_enum_has_three_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["traceability_risk"]["enum"] == ["low", "medium", "high"]

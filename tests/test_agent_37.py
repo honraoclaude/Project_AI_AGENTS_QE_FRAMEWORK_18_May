@@ -6,7 +6,10 @@ import pytest
 
 from src.agents.testing.agent_37_performance_test import (
     _assess_performance,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -86,6 +89,31 @@ class TestPerformanceAssessment:
         _, _, gov_ok, _ = _assess_performance(AGENT20_LOW, None)
         assert gov_ok is True
 
+    def test_soql_loop_only_gives_fail(self):
+        # soql_loop=True with MEDIUM risk: required=True (soql), resp_ok=True (not HIGH), gov_ok=False (soql)
+        agent20_soql_medium = {"performance_risk_level": "MEDIUM", "soql_loop_risk": True, "governor_limit_exposure": "LOW"}
+        required, resp_ok, gov_ok, verdict = _assess_performance(agent20_soql_medium, None)
+        assert required is True
+        assert resp_ok is True
+        assert gov_ok is False
+        assert verdict == "FAIL"
+
+    def test_high_risk_without_soql_loop_gives_fail(self):
+        # HIGH risk + no soql_loop: resp_ok=False (HIGH), gov_ok=True (LOW exposure, no soql)
+        agent20_high_no_soql = {"performance_risk_level": "HIGH", "soql_loop_risk": False, "governor_limit_exposure": "LOW"}
+        required, resp_ok, gov_ok, verdict = _assess_performance(agent20_high_no_soql, None)
+        assert required is True
+        assert resp_ok is False
+        assert gov_ok is True
+        assert verdict == "FAIL"
+
+    def test_high_gov_exposure_without_soql_gives_gov_not_ok(self):
+        # gov_exposure=HIGH without soql_loop → gov_ok=False (not required since LOW perf_risk)
+        agent20_gov = {"performance_risk_level": "LOW", "soql_loop_risk": False, "governor_limit_exposure": "HIGH"}
+        _, _, gov_ok, verdict = _assess_performance(agent20_gov, None)
+        assert gov_ok is False
+        assert verdict == "SKIPPED"  # not required since LOW + no soql_loop
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -106,6 +134,26 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, "FAIL")
         assert score >= 20
+
+    def test_performance_risk_signal_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT20_LOW, None, "SKIPPED")
+        assert "performance_risk_signal_available" in signals
+
+    def test_no_performance_risk_signal_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, "SKIPPED")
+        assert "no_performance_risk_signal" in signals
+
+    def test_crt_passed_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT20_LOW, AGENT27_PASS, "SKIPPED")
+        assert "crt_passed" in signals
+
+    def test_performance_fail_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT20_HIGH, None, "FAIL")
+        assert "performance_fail" in signals
+
+    def test_performance_test_not_required_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT20_LOW, None, "SKIPPED")
+        assert "performance_test_not_required" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -171,3 +219,97 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=58, no_performance_risk_signal→-10=48, verdict=SKIPPED→+3=51 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_37_performance_test.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_37_performance_test.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_37_performance_test.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_37_performance_test.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_SKIPPED
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "FSC-2417" in msg
+
+    def test_includes_performance_risk(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "HIGH" in msg
+
+    def test_includes_soql_loop_risk(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "True" in msg
+
+    def test_includes_governor_exposure(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "HIGH" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "FAIL" in msg
+
+    def test_includes_required_flag(self):
+        msg = _build_trace_message("FSC-2417", AGENT20_HIGH, True, False, False, "FAIL")
+        assert "True" in msg
+
+    def test_unknown_risk_when_no_agent20(self):
+        msg = _build_trace_message("FSC-2417", None, False, True, True, "SKIPPED")
+        assert "UNKNOWN" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", None, False, True, True, "SKIPPED")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "performance_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_performance_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["performance_concern"]["enum"] == [
+            "none", "response_time_breach", "governor_limit_breach",
+            "test_skipped_for_high_risk", "multiple",
+        ]

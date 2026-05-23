@@ -6,7 +6,10 @@ import pytest
 
 from src.agents.development.agent_15_apex_security import (
     _analyse_security_risk,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -141,6 +144,20 @@ class TestSecurityAnalysis:
         _, _, _, sharing_with_objects, _ = _analyse_security_risk(AGENT3_HIGH, AGENT13_SUITABILITY)
         assert sharing_with_objects is True
 
+    def test_medium_fca_with_high_risk_objects_gives_medium_risk(self):
+        risk, _, _, _, verdict = _analyse_security_risk(AGENT3_MEDIUM, AGENT13_SUITABILITY)
+        assert risk == "MEDIUM"
+        assert verdict == "REVIEW_REQUIRED"
+
+    def test_low_fca_with_high_risk_objects_gives_medium_risk(self):
+        risk, _, _, _, verdict = _analyse_security_risk(AGENT3_LOW, AGENT13_FINANCIAL)
+        assert risk == "MEDIUM"
+        assert verdict == "REVIEW_REQUIRED"
+
+    def test_high_fca_no_fsc_objects_flag_mentions_no_review_required(self):
+        _, flags, _, _, _ = _analyse_security_risk(AGENT3_HIGH, AGENT13_EMPTY)
+        assert any("no regulated" in f.lower() or "not required" in f.lower() for f in flags)
+
 
 # ── Confidence scoring unit tests ─────────────────────────────────────────────
 
@@ -166,6 +183,30 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, [])
         assert score >= 20
+
+    def test_fca_class_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_SUITABILITY, ["suitability__c"])
+        assert "fca_class_available" in signals
+
+    def test_fca_class_unavailable_key_in_signals(self):
+        _, signals = _compute_confidence(None, AGENT13_SUITABILITY, ["suitability__c"])
+        assert "fca_class_unavailable" in signals
+
+    def test_metadata_scope_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_SUITABILITY, ["suitability__c"])
+        assert "metadata_scope_available" in signals
+
+    def test_metadata_scope_unavailable_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, None, [])
+        assert "metadata_scope_unavailable" in signals
+
+    def test_fsc_objects_in_scope_stores_count(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_SUITABILITY, ["suitability__c"])
+        assert signals["fsc_objects_in_scope"] == 1
+
+    def test_no_fsc_objects_detected_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT3_HIGH, AGENT13_EMPTY, [])
+        assert "no_fsc_objects_detected" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -232,3 +273,95 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_no_upstream_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_15_apex_security.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_15_apex_security.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_15_apex_security.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_LOW
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["3"] = {"data": AGENT3_HIGH}
+        state["agent_results"]["13"] = {"data": AGENT13_SUITABILITY}
+
+        with patch("src.agents.development.agent_15_apex_security.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_HIGH
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], [], "HIGH", True, True)
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], [], "HIGH", True, True)
+        assert "HIGH" in msg
+
+    def test_includes_risk_level(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], [], "HIGH", True, True)
+        assert "Security risk level: HIGH" in msg
+
+    def test_empty_detected_shows_none(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], [], "HIGH", True, True)
+        assert "Detected FSC objects: ['none']" in msg
+
+    def test_detected_objects_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", ["suitability__c"], [], "HIGH", True, True)
+        assert "suitability__c" in msg
+
+    def test_empty_flags_shows_none(self):
+        msg = _build_trace_message("FSC-2417", "LOW", [], [], "LOW", False, False)
+        assert "Security flags: ['none']" in msg
+
+    def test_flags_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", "HIGH", [], ["CRUD/FLS enforcement required"], "HIGH", True, False)
+        assert "CRUD/FLS enforcement required" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", "LOW", [], [], "LOW", False, False)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "security_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_security_concern_enum_has_four_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["security_concern"]["enum"] == ["none", "low", "medium", "high"]

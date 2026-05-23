@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.testing.agent_26_crt_scenario_designer import (
+    _build_prompt,
     _compute_confidence,
+    _CRT_TOOL_NAME,
+    _CRT_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -108,6 +111,48 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence(None, None, 0, 0.0, "INCOMPLETE")
         assert score >= 20
 
+    def test_gherkin_scenarios_available_key_and_value(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS")
+        assert signals["gherkin_scenarios_available"] == 4
+
+    def test_no_gherkin_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT19_EMPTY, None, 0, 0.0, "INCOMPLETE")
+        assert "no_gherkin_scenarios" in signals
+
+    def test_test_data_available_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS")
+        assert "test_data_available" in signals
+
+    def test_crt_tests_designed_key_and_value(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS")
+        assert signals["crt_tests_designed"] == 4
+
+    def test_no_crt_tests_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 0, 0.0, "INCOMPLETE")
+        assert "no_crt_tests" in signals
+
+    def test_high_automation_coverage_key_and_value(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS")
+        assert signals["high_automation_coverage"] == 100.0
+
+    def test_low_automation_coverage_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 1, 20.0, "PARTIAL")
+        assert "low_automation_coverage" in signals
+
+    def test_incomplete_design_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 0, 0.0, "INCOMPLETE")
+        assert "incomplete_design" in signals
+
+    def test_scenarios_truncated_key_in_signals_when_true(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS",
+                                         scenarios_truncated=True)
+        assert "scenarios_truncated" in signals
+
+    def test_scenarios_truncated_not_in_signals_when_false(self):
+        _, signals = _compute_confidence(AGENT19_FULL, AGENT21_DATA, 4, 100.0, "PASS",
+                                         scenarios_truncated=False)
+        assert "scenarios_truncated" not in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -174,6 +219,37 @@ class TestAgentRun:
 
         assert result.model_used == "claude-sonnet-4-6"
 
+    async def test_escalated_when_no_upstream_data(self):
+        # base=68, no gherkin→-15, no crt tests→-10, INCOMPLETE→-10 = 33 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_26_crt_scenario_designer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRT_INCOMPLETE
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_26_crt_scenario_designer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRT_FULL
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.testing.agent_26_crt_scenario_designer.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_CRT_FULL
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
 
 # ── REQ-17: Scenario truncation detection ─────────────────────────────────────
 
@@ -227,3 +303,95 @@ class TestScenarioTruncationRunREQ17:
 
         assert result.data["scenarios_truncated"] is False
         assert result.data["truncated_scenario_count"] == 0
+
+
+# ── Prompt builder unit tests ─────────────────────────────────────────────────
+
+_SIMPLE_SCENARIO = [{"title": "Test scenario", "tags": ["@smoke"],
+                     "steps": ["Given step", "When action", "Then result"]}]
+
+_SEED_RECORDS = [{"object_name": "FinancialAccount", "record_count": 2,
+                  "key_fields": [], "purpose": ""}]
+
+
+class TestBuildPrompt:
+    def test_includes_story_id(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", [], [], "SMOKE")
+        assert "FSC-2417" in prompt
+
+    def test_includes_fca_class(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", [], [], "SMOKE")
+        assert "HIGH" in prompt
+
+    def test_includes_regression_suite(self):
+        prompt = _build_prompt("FSC-2417", "LOW", [], [], "FULL")
+        assert "FULL" in prompt
+
+    def test_no_scenarios_shows_placeholder(self):
+        prompt = _build_prompt("FSC-2417", "LOW", [], [], "SMOKE")
+        assert "(no Gherkin scenarios available)" in prompt
+
+    def test_scenario_titles_shown_when_present(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", _SIMPLE_SCENARIO, [], "SMOKE")
+        assert "Test scenario" in prompt
+
+    def test_truncation_note_when_truncated(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", _SIMPLE_SCENARIO, [], "SMOKE",
+                               scenarios_truncated=True, truncated_count=3)
+        assert "omitted" in prompt
+
+    def test_no_truncation_note_when_not_truncated(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", _SIMPLE_SCENARIO, [], "SMOKE",
+                               scenarios_truncated=False)
+        assert "omitted" not in prompt
+
+    def test_manual_note_when_present(self):
+        prompt = _build_prompt("FSC-2417", "LOW", [], [], "SMOKE",
+                               manual_test_present=True)
+        assert "ManualTest" in prompt
+
+    def test_no_manual_note_when_absent(self):
+        prompt = _build_prompt("FSC-2417", "LOW", [], [], "SMOKE",
+                               manual_test_present=False)
+        assert "ManualTest" not in prompt
+
+    def test_seed_names_in_prompt(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", [], _SEED_RECORDS, "SMOKE")
+        assert "FinancialAccount" in prompt
+
+    def test_no_seed_records_shows_none(self):
+        prompt = _build_prompt("FSC-2417", "HIGH", [], [], "SMOKE")
+        assert "['none']" in prompt
+
+    def test_ends_with_tool_name(self):
+        prompt = _build_prompt("FSC-2417", "LOW", [], [], "SMOKE")
+        assert _CRT_TOOL_NAME in prompt
+        assert prompt.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_five_required_fields(self):
+        assert set(_CRT_TOOL_SCHEMA["required"]) == {
+            "crt_test_cases", "crt_test_count", "automation_coverage",
+            "crt_design_verdict", "design_notes",
+        }
+
+    def test_crt_design_verdict_enum_has_three_values(self):
+        assert _CRT_TOOL_SCHEMA["properties"]["crt_design_verdict"]["enum"] == [
+            "PASS", "PARTIAL", "INCOMPLETE"
+        ]
+
+    def test_test_case_items_have_five_required_fields(self):
+        item_schema = _CRT_TOOL_SCHEMA["properties"]["crt_test_cases"]["items"]
+        assert set(item_schema["required"]) == {
+            "test_id", "title", "tags", "steps", "data_references"
+        }
+
+    def test_step_items_have_three_required_fields(self):
+        step_schema = (
+            _CRT_TOOL_SCHEMA["properties"]["crt_test_cases"]["items"]
+            ["properties"]["steps"]["items"]
+        )
+        assert set(step_schema["required"]) == {"action", "target", "value"}

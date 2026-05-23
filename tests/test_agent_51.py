@@ -84,6 +84,14 @@ class TestComputeStatus:
         # 40% error rate → DEGRADED (< 0.5)
         assert _compute_status(10, 4, 500.0) == "DEGRADED"
 
+    def test_exact_latency_threshold_gives_healthy(self):
+        # exactly 30_000ms — not > LATENCY_ALERT_MS so condition is false → HEALTHY
+        assert _compute_status(5, 0, 30_000.0) == "HEALTHY"
+
+    def test_high_latency_and_high_error_rate_gives_down(self):
+        # both OR arms true; error_rate=0.60 >= 0.5 → DOWN
+        assert _compute_status(10, 6, 35_000.0) == "DOWN"
+
 
 # ── AGENT_NAMES coverage ──────────────────────────────────────────────────────
 
@@ -194,6 +202,32 @@ class TestAgentRun:
 
         assert "1" in result.what  # 1 of 3 degraded
 
+    async def test_down_agent_appears_in_degraded_list(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_51_health._collect_metrics",
+                   new_callable=AsyncMock) as mock_collect, \
+             patch("src.agents.monitoring.agent_51_health._generate_summary",
+                   new_callable=AsyncMock) as mock_summary:
+            mock_collect.return_value = MOCK_ONE_DOWN
+            mock_summary.return_value = "Agent 1 is down."
+            result = await run(state)
+
+        assert 1 in result.data["degraded_agents"]
+
+    async def test_data_has_summary_key(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.monitoring.agent_51_health._collect_metrics",
+                   new_callable=AsyncMock) as mock_collect, \
+             patch("src.agents.monitoring.agent_51_health._generate_summary",
+                   new_callable=AsyncMock) as mock_summary:
+            mock_collect.return_value = MOCK_ALL_HEALTHY
+            mock_summary.return_value = "All healthy."
+            result = await run(state)
+
+        assert "summary" in result.data
+
 
 # ── run_scheduled() tests ─────────────────────────────────────────────────────
 
@@ -232,6 +266,20 @@ class TestRunScheduled:
                    new_callable=AsyncMock) as mock_alert:
             mock_collect.return_value = MOCK_ONE_DEGRADED
             mock_summary.return_value = "Agent 2 is degraded."
+            await run_scheduled()
+
+        mock_alert.assert_called_once()
+
+    async def test_sends_alert_when_agent_is_down(self):
+        # DOWN status != "HEALTHY" → must appear in degraded → alert fired
+        with patch("src.agents.monitoring.agent_51_health._collect_metrics",
+                   new_callable=AsyncMock) as mock_collect, \
+             patch("src.agents.monitoring.agent_51_health._generate_summary",
+                   new_callable=AsyncMock) as mock_summary, \
+             patch("src.agents.monitoring.agent_51_health._send_alert",
+                   new_callable=AsyncMock) as mock_alert:
+            mock_collect.return_value = MOCK_ONE_DOWN
+            mock_summary.return_value = "Agent 1 is down."
             await run_scheduled()
 
         mock_alert.assert_called_once()

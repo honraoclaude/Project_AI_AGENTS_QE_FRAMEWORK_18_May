@@ -6,15 +6,19 @@ import pytest
 
 from src.agents.release.agent_39_release_readiness import (
     _assess_readiness,
+    _build_trace_message,
     _compute_confidence,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-AGENT23_PASS = {"development_verdict": "PASS", "narrative": "All development checks passed."}
-AGENT23_FAIL = {"development_verdict": "FAIL", "narrative": "Critical failures found."}
+AGENT23_PASS    = {"development_verdict": "PASS",    "narrative": "All development checks passed."}
+AGENT23_FAIL    = {"development_verdict": "FAIL",    "narrative": "Critical failures found."}
+AGENT23_PARTIAL = {"development_verdict": "PARTIAL", "narrative": "Some checks incomplete."}
 
 AGENT33_PASS = {"coverage_verdict": "PASS", "overall_coverage_pct": 92.0}
 AGENT33_FAIL = {"coverage_verdict": "FAIL", "overall_coverage_pct": 58.0}
@@ -112,6 +116,14 @@ class TestAssessReadiness:
         )
         assert len(blockers) >= 4
 
+    def test_dev_partial_blocks_release(self):
+        ready, blockers, verdict = _assess_readiness(
+            AGENT23_PARTIAL, AGENT33_PASS, AGENT34_PASS, AGENT35_RESOLVED, AGENT36_NOT_REQUIRED,
+        )
+        assert ready is False
+        assert verdict == "BLOCKED"
+        assert any("PARTIAL" in b for b in blockers)
+
 
 # ── Confidence scoring tests ──────────────────────────────────────────────────
 
@@ -137,6 +149,30 @@ class TestConfidenceScoring:
     def test_score_never_below_20(self):
         score, _ = _compute_confidence(None, None, None, None, "BLOCKED")
         assert score >= 20
+
+    def test_comprehensive_phase_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_PASS, AGENT33_PASS, AGENT34_PASS, AGENT36_NOT_REQUIRED, "READY")
+        assert "comprehensive_phase_data" in signals
+
+    def test_comprehensive_phase_data_stores_count(self):
+        _, signals = _compute_confidence(AGENT23_PASS, AGENT33_PASS, AGENT34_PASS, AGENT36_NOT_REQUIRED, "READY")
+        assert signals["comprehensive_phase_data"] == 4
+
+    def test_partial_phase_data_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_PASS, None, None, None, "READY")
+        assert "partial_phase_data" in signals
+
+    def test_no_phase_data_key_in_signals(self):
+        _, signals = _compute_confidence(None, None, None, None, "READY")
+        assert "no_phase_data" in signals
+
+    def test_all_phases_clear_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_PASS, AGENT33_PASS, AGENT34_PASS, AGENT36_NOT_REQUIRED, "READY")
+        assert "all_phases_clear" in signals
+
+    def test_release_blocked_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT23_PASS, AGENT33_PASS, AGENT34_FAIL, AGENT36_NOT_REQUIRED, "BLOCKED")
+        assert "release_blocked" in signals
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -220,3 +256,95 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-haiku-4-5-20251001"
+
+    async def test_escalated_when_single_source_and_blocked(self):
+        # base=63, partial_phase_data(1)→+4=67, release_blocked→-8=59 < 60
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["34"] = {"data": AGENT34_FAIL}
+
+        with patch("src.agents.release.agent_39_release_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_BLOCKED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_39_release_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_READY
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_39_release_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_READY
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.release.agent_39_release_readiness.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_READY
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", True, [], "READY", AGENT33_PASS, AGENT36_NOT_REQUIRED)
+        assert "FSC-2417" in msg
+
+    def test_includes_verdict(self):
+        msg = _build_trace_message("FSC-2417", True, [], "READY", AGENT33_PASS, AGENT36_NOT_REQUIRED)
+        assert "READY" in msg
+
+    def test_includes_coverage_pct(self):
+        msg = _build_trace_message("FSC-2417", True, [], "READY", AGENT33_PASS, AGENT36_NOT_REQUIRED)
+        assert "92.0" in msg
+
+    def test_includes_uat_coordination(self):
+        msg = _build_trace_message("FSC-2417", True, [], "PARTIAL", AGENT33_PASS, AGENT36_PENDING)
+        assert "PENDING" in msg
+
+    def test_includes_blockers(self):
+        blockers = ["Unresolved critical defects: ['DEF-001']"]
+        msg = _build_trace_message("FSC-2417", False, blockers, "BLOCKED", None, None)
+        assert "DEF-001" in msg
+
+    def test_no_blockers_shows_none_sentinel(self):
+        msg = _build_trace_message("FSC-2417", True, [], "READY", None, None)
+        assert "['none']" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", True, [], "READY", None, None)
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "readiness_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_readiness_concern_enum_has_five_values(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["readiness_concern"]["enum"] == [
+            "none", "testing_incomplete", "unresolved_defects",
+            "uat_pending", "coverage_below_threshold",
+        ]

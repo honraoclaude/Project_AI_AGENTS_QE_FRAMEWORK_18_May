@@ -5,15 +5,19 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.development.agent_19_bdd_gherkin_writer import (
+    _build_prompt,
     _compute_confidence,
+    _GHERKIN_TOOL_NAME,
+    _GHERKIN_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-AGENT3_HIGH   = {"fca_classification": "HIGH", "ensemble_agreement": True}
-AGENT3_LOW    = {"fca_classification": "LOW",  "ensemble_agreement": True}
+AGENT3_HIGH   = {"fca_classification": "HIGH",   "ensemble_agreement": True}
+AGENT3_MEDIUM = {"fca_classification": "MEDIUM", "ensemble_agreement": True}
+AGENT3_LOW    = {"fca_classification": "LOW",    "ensemble_agreement": True}
 AGENT5_DATA   = {"ac_count": 3, "acs_generated": True}
 AGENT10_PASS  = {"coverage_verdict": "PASS", "current_ac_count": 3}
 AGENT13_DATA  = {"detected_objects": ["suitability__c", "riskprofile__c"]}
@@ -115,6 +119,43 @@ class TestConfidenceScoring:
         score_high, _ = _compute_confidence(MOCK_ACS, AGENT3_LOW, AGENT5_DATA, 2, "LOW", False)
         score_low_penalised, _ = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 2, "HIGH", False)
         assert score_high >= score_low_penalised
+
+    def test_acs_available_stores_count(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 3, "HIGH", True)
+        assert signals["acs_available"] == len(MOCK_ACS)
+
+    def test_no_acs_available_key_in_signals(self):
+        _, signals = _compute_confidence([], AGENT3_HIGH, AGENT5_DATA, 0, "HIGH", False)
+        assert "no_acs_available" in signals
+
+    def test_fca_classification_available_key_in_signals(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 3, "HIGH", True)
+        assert "fca_classification_available" in signals
+
+    def test_refined_ac_baseline_available_key_in_signals(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 3, "HIGH", True)
+        assert "refined_ac_baseline_available" in signals
+
+    def test_scenarios_generated_stores_count(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 3, "HIGH", True)
+        assert signals["scenarios_generated"] == 3
+
+    def test_no_scenarios_generated_key_in_signals(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 0, "HIGH", False)
+        assert "no_scenarios_generated" in signals
+
+    def test_regulated_story_missing_fca_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 2, "HIGH", False)
+        assert "regulated_story_missing_fca_scenarios" in signals
+
+    def test_regulated_story_has_fca_scenarios_key_in_signals(self):
+        _, signals = _compute_confidence(MOCK_ACS, AGENT3_HIGH, AGENT5_DATA, 2, "HIGH", True)
+        assert "regulated_story_has_fca_scenarios" in signals
+
+    def test_medium_fca_missing_fca_scenarios_penalised(self):
+        score_with, _ = _compute_confidence(MOCK_ACS, AGENT3_MEDIUM, AGENT5_DATA, 2, "MEDIUM", True)
+        score_without, _ = _compute_confidence(MOCK_ACS, AGENT3_MEDIUM, AGENT5_DATA, 2, "MEDIUM", False)
+        assert score_with > score_without
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -238,6 +279,80 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.model_used == "claude-sonnet-4-6"
+
+    async def test_escalated_when_no_acs_and_no_scenarios(self):
+        # base=70, no_acs_available=-20, no_scenarios_generated=-15 → 35 < 60
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = []
+            mock_sonnet.return_value = MOCK_GHERKIN_INCOMPLETE
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_ac_count_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert "ac_count" in result.data
+        assert result.data["ac_count"] == len(MOCK_ACS)
 
 
 # ── Shapley attribution tests ─────────────────────────────────────────────────
@@ -477,3 +592,74 @@ class TestVulnerableCustomerBulkREQ12:
             result = await run(state)
 
         assert result.data["bulk_test_scenarios_generated"] is False
+
+
+# ── _build_prompt unit tests ──────────────────────────────────────────────────
+
+_SIMPLE_STORY = {"summary": "Test Story", "description": "desc"}
+
+class TestBuildPrompt:
+    def test_includes_story_id(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [])
+        assert "FSC-2417" in msg
+
+    def test_includes_fca_class(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [])
+        assert "HIGH" in msg
+
+    def test_no_acs_shows_placeholder(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, [], "LOW", 0, "", [])
+        assert "(no acceptance criteria available)" in msg
+
+    def test_acs_formatted_with_prefix(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [])
+        assert "AC1:" in msg
+
+    def test_vc_impact_true_shows_mandatory_note(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [],
+                            vulnerable_customer_impact=True)
+        assert "Vulnerable Customer Impact: TRUE" in msg
+        assert "mandatory" in msg
+
+    def test_vc_impact_false_shows_false(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "LOW", 0, "", [],
+                            vulnerable_customer_impact=False)
+        assert "Vulnerable Customer Impact: FALSE" in msg
+
+    def test_bulk_high_includes_factors(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "LOW", 0, "", [],
+                            bulk_risk_level="HIGH", bulk_risk_factors=["DML governor limits"])
+        assert "Bulk Risk Level: HIGH" in msg
+        assert "DML governor limits" in msg
+
+    def test_bulk_low_shows_level_only(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "LOW", 0, "", [],
+                            bulk_risk_level="LOW")
+        assert "Bulk Risk Level: LOW" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [])
+        assert _GHERKIN_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_six_required_fields(self):
+        assert set(_GHERKIN_TOOL_SCHEMA["required"]) == {
+            "scenarios", "scenario_count", "gherkin_verdict",
+            "fca_coverage_present", "vulnerable_customer_coverage_present", "coverage_gaps",
+        }
+
+    def test_gherkin_verdict_enum_has_three_values(self):
+        assert _GHERKIN_TOOL_SCHEMA["properties"]["gherkin_verdict"]["enum"] == [
+            "PASS", "PARTIAL", "INCOMPLETE"
+        ]
+
+    def test_scenarios_is_array_type(self):
+        assert _GHERKIN_TOOL_SCHEMA["properties"]["scenarios"]["type"] == "array"
+
+    def test_scenario_item_has_three_required_fields(self):
+        item_required = set(_GHERKIN_TOOL_SCHEMA["properties"]["scenarios"]["items"]["required"])
+        assert item_required == {"title", "tags", "steps"}

@@ -6,10 +6,13 @@ import pytest
 
 from src.agents.development.agent_18_component_attribution import (
     _analyse_components,
+    _build_trace_message,
     _compute_confidence,
     _extract_component_name,
     _infer_component_type,
     _is_regulated,
+    _TRACE_TOOL_NAME,
+    _TRACE_TOOL_SCHEMA,
     run,
 )
 from src.core.schemas import initial_story_state
@@ -77,6 +80,14 @@ class TestComponentNameExtraction:
         name = _extract_component_name("force-app/main/default/staticresources/myfile.zip")
         assert name == "myfile.zip"
 
+    def test_extracts_flow_meta_xml_name(self):
+        name = _extract_component_name("force-app/main/default/flows/SuitabilityAssessment.flow-meta.xml")
+        assert name == "SuitabilityAssessment"
+
+    def test_extracts_object_meta_xml_name(self):
+        name = _extract_component_name("force-app/main/default/objects/RiskProfile__c.object-meta.xml")
+        assert name == "RiskProfile__c"
+
 
 # ── Component type inference tests ────────────────────────────────────────────
 
@@ -95,6 +106,15 @@ class TestComponentTypeInference:
 
     def test_unknown_extension_returns_unknown(self):
         assert _infer_component_type("someFile.xyz") == "Unknown"
+
+    def test_aura_path_inferred_as_aura_component(self):
+        assert _infer_component_type("force-app/main/default/aura/MyApp/MyApp.app") == "AuraComponent"
+
+    def test_object_meta_xml_inferred_as_custom_object(self):
+        assert _infer_component_type("objects/RiskProfile__c.object-meta.xml") == "CustomObject"
+
+    def test_field_meta_xml_inferred_as_custom_field(self):
+        assert _infer_component_type("objects/Account/fields/Revenue__c.field-meta.xml") == "CustomField"
 
 
 # ── Regulated component detection tests ──────────────────────────────────────
@@ -117,6 +137,12 @@ class TestRegulatedDetection:
 
     def test_case_insensitive(self):
         assert _is_regulated("SUITABILITYSERVICE") is True
+
+    def test_consumerduty_is_regulated(self):
+        assert _is_regulated("ConsumerDutyReport") is True
+
+    def test_financialholding_is_regulated(self):
+        assert _is_regulated("FinancialHoldingService") is True
 
 
 # ── Deterministic component analysis tests ───────────────────────────────────
@@ -247,6 +273,45 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence([], None, None, [], [])
         assert score >= 20
 
+    def test_files_available_stores_count(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, None, AGENT13_WITH_FILES, [], [])
+        assert signals["files_available"] == len(files)
+
+    def test_no_files_available_key_in_signals(self):
+        _, signals = _compute_confidence([], None, None, [], [])
+        assert "no_files_available" in signals
+
+    def test_branch_context_available_key_in_signals(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, AGENT11_FOUND, AGENT13_WITH_FILES, [], [])
+        assert "branch_context_available" in signals
+
+    def test_metadata_scope_available_key_in_signals(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, None, AGENT13_WITH_FILES, [], [])
+        assert "metadata_scope_available" in signals
+
+    def test_no_metadata_scope_key_in_signals(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, None, None, [], [])
+        assert "no_metadata_scope" in signals
+
+    def test_regulated_components_detected_stores_count(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, None, AGENT13_WITH_FILES, ["SuitabilityService"], [])
+        assert signals["regulated_components_detected"] == 1
+
+    def test_merge_risk_detected_stores_count(self):
+        files = AGENT13_MERGE_RISK["changed_files"]
+        _, signals = _compute_confidence(files, None, AGENT13_WITH_FILES, [], ["FinancialAccountService"])
+        assert signals["merge_risk_detected"] == 1
+
+    def test_author_data_unavailable_key_in_signals(self):
+        files = AGENT13_WITH_FILES["changed_files"]
+        _, signals = _compute_confidence(files, None, AGENT13_WITH_FILES, [], [], author_data_available=False)
+        assert "author_data_unavailable" in signals
+
 
 # ── Integration tests ─────────────────────────────────────────────────────────
 
@@ -308,3 +373,103 @@ class TestAgentRun:
             result = await run(state)
 
         assert result.data["component_verdict"] == "PASS"
+
+    async def test_escalated_when_no_upstream_data(self):
+        # base=62, no_files_available=-10, no_metadata_scope=-5 → 47 < 60
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_18_component_attribution.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_what_contains_story_id(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_18_component_attribution.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert "FSC-2417" in result.what
+
+    async def test_signals_is_dict(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.development.agent_18_component_attribution.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
+
+    async def test_narrative_is_string_in_data(self):
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["13"] = {"data": AGENT13_WITH_FILES}
+
+        with patch("src.agents.development.agent_18_component_attribution.call_with_tool",
+                   new_callable=AsyncMock) as mock_haiku:
+            mock_haiku.return_value = MOCK_TRACE_PASS
+            result = await run(state)
+
+        assert isinstance(result.data["narrative"], str)
+
+
+# ── Trace message unit tests ──────────────────────────────────────────────────
+
+class TestBuildTraceMessage:
+    def _sample_component(self, name="SuitabilityService", ctype="ApexClass", regulated=True):
+        return {"name": name, "type": ctype, "is_regulated": regulated}
+
+    def test_includes_story_id(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], "PASS")
+        assert "FSC-2417" in msg
+
+    def test_includes_total_components_count(self):
+        comp = self._sample_component()
+        msg = _build_trace_message("FSC-2417", [comp], [], [], "PASS")
+        assert "Total components: 1" in msg
+
+    def test_empty_components_shows_none_placeholder(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], "PASS")
+        assert "  none" in msg
+
+    def test_component_name_and_type_shown(self):
+        comp = self._sample_component()
+        msg = _build_trace_message("FSC-2417", [comp], [], [], "PASS")
+        assert "SuitabilityService" in msg
+        assert "ApexClass" in msg
+
+    def test_empty_regulated_shows_none(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], "PASS")
+        assert "Regulated components: ['none']" in msg
+
+    def test_regulated_shown_when_present(self):
+        msg = _build_trace_message("FSC-2417", [], ["SuitabilityService"], [], "WARN")
+        assert "SuitabilityService" in msg
+
+    def test_verdict_shown(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], "PASS")
+        assert "Verdict: PASS" in msg
+
+    def test_ends_with_tool_name(self):
+        msg = _build_trace_message("FSC-2417", [], [], [], "PASS")
+        assert _TRACE_TOOL_NAME in msg
+        assert msg.strip().endswith("tool.")
+
+
+# ── Schema contract tests ─────────────────────────────────────────────────────
+
+class TestSchemaContract:
+    def test_schema_has_two_required_fields(self):
+        assert set(_TRACE_TOOL_SCHEMA["required"]) == {"narrative", "attribution_concern"}
+
+    def test_narrative_is_string(self):
+        assert _TRACE_TOOL_SCHEMA["properties"]["narrative"]["type"] == "string"
+
+    def test_attribution_concern_enum_has_four_values(self):
+        assert set(_TRACE_TOOL_SCHEMA["properties"]["attribution_concern"]["enum"]) == {
+            "none", "merge_risk", "regulated_components", "both"
+        }

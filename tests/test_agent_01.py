@@ -216,6 +216,80 @@ class TestAgentRun:
 
         assert "high_fca_object_detected" in result.data.get("flags", [])
 
+    # C1 — escalation threshold
+    async def test_high_confidence_story_is_not_escalated(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_01_story_intent.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_01_story_intent.get_acceptance_criteria", new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_01_story_intent.call_with_tool", new_callable=AsyncMock) as mock_llm,
+            patch("src.agents.refinement.agent_01_story_intent.settings") as mock_settings,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_EXTRACTION_SUITABILITY
+            mock_settings.default_model = "claude-sonnet-4-6"
+            mock_settings.confidence_escalation_threshold = 60  # score will be 92 — above threshold
+            result = await run(state)
+        assert result.escalated is False
+
+    async def test_low_confidence_story_is_escalated(self):
+        state = initial_story_state("FSC-2500")
+        with (
+            patch("src.agents.refinement.agent_01_story_intent.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_01_story_intent.get_acceptance_criteria", new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_01_story_intent.call_with_tool", new_callable=AsyncMock) as mock_llm,
+            patch("src.agents.refinement.agent_01_story_intent.settings") as mock_settings,
+        ):
+            mock_story.return_value = STORY_LABEL_CHANGE
+            mock_ac.return_value = []
+            mock_llm.return_value = MOCK_EXTRACTION_LABEL
+            mock_settings.default_model = "claude-sonnet-4-6"
+            mock_settings.confidence_escalation_threshold = 99  # threshold above any achievable score
+            result = await run(state)
+        assert result.escalated is True
+
+    # H1 — data dict keys added by run()
+    async def test_data_contains_story_summary_jira(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_01_story_intent.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_01_story_intent.get_acceptance_criteria", new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_01_story_intent.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_EXTRACTION_SUITABILITY
+            result = await run(state)
+        assert result.data["story_summary_jira"] == STORY_SUITABILITY["summary"]
+
+    async def test_data_contains_description_word_count(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_01_story_intent.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_01_story_intent.get_acceptance_criteria", new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_01_story_intent.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_EXTRACTION_SUITABILITY
+            result = await run(state)
+        expected = len((STORY_SUITABILITY["description"] or "").split())
+        assert result.data["description_word_count"] == expected
+
+    async def test_data_contains_ac_clause_count(self):
+        state = initial_story_state("FSC-2417")
+        with (
+            patch("src.agents.refinement.agent_01_story_intent.get_story", new_callable=AsyncMock) as mock_story,
+            patch("src.agents.refinement.agent_01_story_intent.get_acceptance_criteria", new_callable=AsyncMock) as mock_ac,
+            patch("src.agents.refinement.agent_01_story_intent.call_with_tool", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_story.return_value = STORY_SUITABILITY
+            mock_ac.return_value = AC_CLAUSES_FULL
+            mock_llm.return_value = MOCK_EXTRACTION_SUITABILITY
+            result = await run(state)
+        assert result.data["ac_clause_count"] == len(AC_CLAUSES_FULL)
+
 
 # ── Helpers for functional tests ──────────────────────────────────────────────
 
@@ -371,6 +445,38 @@ class TestConfidenceSignals:
         score_other,   _ = _compute_confidence(_story(desc), [], _extraction(flags=["high_fca_object_detected"]))
         assert score_no_flag == score_other
 
+    # M1 — additional HIGH-FCA keywords
+    def test_riskprofile_keyword_triggers_fca_signal(self):
+        desc_fca    = "word " * 50 + " riskprofile assessment"
+        desc_no_fca = "word " * 50
+        score_fca,    _ = _compute_confidence(_story(desc_fca),    [], _extraction())
+        score_no_fca, _ = _compute_confidence(_story(desc_no_fca), [], _extraction())
+        assert score_fca - score_no_fca == 5
+
+    def test_consumer_duty_keyword_triggers_fca_signal(self):
+        # "consumer duty" is a two-word keyword — tests that the space is preserved in matching
+        desc_fca    = "word " * 50 + " consumer duty obligations"
+        desc_no_fca = "word " * 50
+        score_fca,    _ = _compute_confidence(_story(desc_fca),    [], _extraction())
+        score_no_fca, _ = _compute_confidence(_story(desc_no_fca), [], _extraction())
+        assert score_fca - score_no_fca == 5
+
+    def test_cobs_keyword_triggers_fca_signal(self):
+        desc_fca    = "word " * 50 + " cobs 9.2 compliance"
+        desc_no_fca = "word " * 50
+        score_fca,    _ = _compute_confidence(_story(desc_fca),    [], _extraction())
+        score_no_fca, _ = _compute_confidence(_story(desc_no_fca), [], _extraction())
+        assert score_fca - score_no_fca == 5
+
+    # M2 — case-insensitive keyword matching
+    def test_fca_keyword_detection_is_case_insensitive(self):
+        # combined_text is lowercased before matching — uppercase keywords must still match
+        desc_upper = "word " * 50 + " SUITABILITY ASSESSMENT"
+        desc_lower = "word " * 50 + " suitability assessment"
+        score_upper, _ = _compute_confidence(_story(desc_upper), [], _extraction())
+        score_lower, _ = _compute_confidence(_story(desc_lower), [], _extraction())
+        assert score_upper == score_lower
+
 
 # ── Score arithmetic tests ────────────────────────────────────────────────────
 
@@ -427,6 +533,22 @@ class TestScoreArithmetic:
         _, signals = _compute_confidence(_story(desc), [], _extraction())
         assert signals["description_words"] == 60   # the observed count, not the +8 adjustment
 
+    # H2 — signals dict stores observed values for other signals
+    def test_signals_persona_stores_persona_string(self):
+        desc = "word " * 50
+        _, signals = _compute_confidence(_story(desc), [], _extraction(persona="Wealth Adviser"))
+        assert signals["persona_identified"] == "Wealth Adviser"
+
+    def test_signals_fsc_count_stores_object_count(self):
+        desc = "word " * 50
+        _, signals = _compute_confidence(_story(desc), [], _extraction(fsc_objects=["A", "B"]))
+        assert signals["fsc_objects_count"] == 2
+
+    def test_signals_vague_goal_stores_true(self):
+        desc = "word " * 50
+        _, signals = _compute_confidence(_story(desc), [], _extraction(flags=["vague_goal"]))
+        assert signals["vague_goal_flag"] is True
+
 
 # ── Prompt content tests ──────────────────────────────────────────────────────
 
@@ -470,6 +592,28 @@ class TestPromptContent:
         assert "COMPONENTS:" in msg
         assert "LABELS:" in msg
 
+    # C2 — empty description → "(empty)"
+    def test_prompt_shows_empty_when_description_is_none(self):
+        story = {**STORY_LABEL_CHANGE, "description": None}
+        msg = _build_user_message(story, [])
+        assert "(empty)" in msg
+
+    # C3 — STATUS field in prompt
+    def test_prompt_includes_status(self):
+        msg = _build_user_message(STORY_SUITABILITY, [])
+        assert "Sprint Ready" in msg
+
+    # M3 — empty components/labels render as "None"
+    def test_empty_components_renders_as_none(self):
+        # STORY_LABEL_CHANGE has components=[] — should render as "None"
+        msg = _build_user_message(STORY_LABEL_CHANGE, [])
+        assert "COMPONENTS: None" in msg
+
+    def test_empty_labels_renders_as_none(self):
+        # STORY_LABEL_CHANGE has labels=[] — should render as "None"
+        msg = _build_user_message(STORY_LABEL_CHANGE, [])
+        assert "LABELS: None" in msg
+
 
 # ── Schema contract tests ─────────────────────────────────────────────────────
 
@@ -502,3 +646,24 @@ class TestSchemaContract:
         flags_schema = _TOOL_SCHEMA["properties"]["flags"]
         assert flags_schema["type"] == "array"
         assert flags_schema["items"]["type"] == "string"
+
+    # C4 — 5 untested fields: goal, persona, fsc_components, missing_elements, story_summary
+
+    def test_goal_is_typed_string(self):
+        assert _TOOL_SCHEMA["properties"]["goal"]["type"] == "string"
+
+    def test_persona_is_typed_string(self):
+        assert _TOOL_SCHEMA["properties"]["persona"]["type"] == "string"
+
+    def test_fsc_components_is_typed_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["fsc_components"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_missing_elements_is_typed_array_of_strings(self):
+        schema = _TOOL_SCHEMA["properties"]["missing_elements"]
+        assert schema["type"] == "array"
+        assert schema["items"]["type"] == "string"
+
+    def test_story_summary_is_typed_string(self):
+        assert _TOOL_SCHEMA["properties"]["story_summary"]["type"] == "string"

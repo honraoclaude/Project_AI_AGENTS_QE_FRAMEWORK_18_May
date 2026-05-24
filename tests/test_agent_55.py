@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.agents.refinement.agent_55_3_amigos_facilitator import (
+    _AMIGOS_TOOL_NAME,
+    _AMIGOS_TOOL_SCHEMA,
     _build_amigos_message,
     _compute_confidence,
     run,
@@ -274,6 +276,71 @@ class TestConfidenceScoring:
         score, _ = _compute_confidence(None, None, None, [], "BLOCKED")
         assert score >= 20
 
+    def test_invest_pass_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "READY")
+        assert "invest_pass" in signals
+
+    def test_invest_fail_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_FAIL, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "NEEDS_DISCUSSION")
+        assert "invest_fail" in signals
+
+    def test_invest_unknown_no_signal(self):
+        # invest_verdict="UNKNOWN" → neither invest_pass nor invest_fail fires
+        agent2_unknown = {"invest_verdict": "UNKNOWN", "invest_score": 0, "blocking_issues": []}
+        _, signals = _compute_confidence(agent2_unknown, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "NEEDS_DISCUSSION")
+        assert "invest_pass" not in signals
+        assert "invest_fail" not in signals
+
+    def test_no_critical_risks_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "READY")
+        assert "no_critical_risks" in signals
+
+    def test_one_critical_risk_signal_key_and_stored_value(self):
+        # exactly 1 critical risk → one_critical_risk signal with stored count=1
+        agent9_one = {"critical_risk_count": 1, "risk_register": [], "overall_risk_level": "HIGH"}
+        _, signals = _compute_confidence(AGENT2_PASS, agent9_one, AGENT3_LOW, [], "NEEDS_DISCUSSION")
+        assert "one_critical_risk" in signals
+        assert signals["one_critical_risk"] == 1
+
+    def test_multiple_critical_risks_signal_stores_count(self):
+        # AGENT9_CRITICAL has critical_risk_count=2
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_CRITICAL, AGENT3_LOW, [], "BLOCKED")
+        assert signals["multiple_critical_risks"] == 2
+
+    def test_high_fca_scrutiny_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_HIGH, [], "READY")
+        assert "high_fca_scrutiny" in signals
+
+    def test_non_high_fca_no_scrutiny_signal(self):
+        # LOW FCA → high_fca_scrutiny must NOT fire
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "READY")
+        assert "high_fca_scrutiny" not in signals
+
+    def test_many_open_questions_signal_stores_count(self):
+        many_qs = ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"]
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, many_qs, "NEEDS_DISCUSSION")
+        assert signals["many_open_questions"] == 6
+
+    def test_five_questions_no_open_questions_signal(self):
+        # exactly 5 → not > 5 → signal does NOT fire
+        five_qs = ["Q1", "Q2", "Q3", "Q4", "Q5"]
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, five_qs, "NEEDS_DISCUSSION")
+        assert "many_open_questions" not in signals
+
+    def test_story_ready_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "READY")
+        assert "story_ready" in signals
+
+    def test_story_blocked_signal_key_in_signals(self):
+        _, signals = _compute_confidence(AGENT2_FAIL, AGENT9_CRITICAL, AGENT3_HIGH, [], "BLOCKED")
+        assert "story_blocked" in signals
+
+    def test_needs_discussion_no_assessment_signal(self):
+        # NEEDS_DISCUSSION → neither story_ready nor story_blocked fires
+        _, signals = _compute_confidence(AGENT2_PASS, AGENT9_NO_CRITICAL, AGENT3_LOW, [], "NEEDS_DISCUSSION")
+        assert "story_ready" not in signals
+        assert "story_blocked" not in signals
+
 
 # ── Prompt building tests ─────────────────────────────────────────────────────
 
@@ -345,6 +412,17 @@ class TestBuildAmigosMessage:
         assert "definition_of_done" in msg
         assert "action_items" in msg
         assert "regression_affected_areas" in msg
+
+    def test_co_signoff_required_in_prompt(self):
+        # AGENT3_HIGH has co_signoff_required=True
+        msg = self._build(agent3_data=AGENT3_HIGH)
+        assert "CO sign-off required" in msg
+        assert "True" in msg
+
+    def test_agent54_adversarial_verdict_in_prompt(self):
+        agent54 = {"adversarial_verdict": "2 CRITICAL weaknesses found in AC clauses"}
+        msg = self._build(agent54_data=agent54)
+        assert "2 CRITICAL weaknesses" in msg
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -459,6 +537,39 @@ class TestAgentRun:
         assert len(result.data["ba_discussion_points"]) > 0
         assert len(result.data["developer_discussion_points"]) > 0
         assert len(result.data["tester_discussion_points"]) > 0
+
+    async def test_escalated_when_invest_fail_multiple_critical_risks_blocked(self):
+        # base=62 -8(invest_fail) -10(multiple_critical) -10(story_blocked) = 34 < 60
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["2"] = {"data": AGENT2_FAIL}
+        state["agent_results"]["9"] = {"data": AGENT9_CRITICAL}
+
+        with patch("src.agents.refinement.agent_55_3_amigos_facilitator.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_AMIGOS_BLOCKED
+            result = await run(state)
+
+        assert result.confidence.escalated is True
+
+    async def test_signals_key_in_data(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.refinement.agent_55_3_amigos_facilitator.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_AMIGOS_READY
+            result = await run(state)
+
+        assert "signals" in result.data
+
+    async def test_signals_is_dict_at_run_level(self):
+        state = initial_story_state("FSC-2417")
+
+        with patch("src.agents.refinement.agent_55_3_amigos_facilitator.call_with_tool",
+                   new_callable=AsyncMock) as mock_sonnet:
+            mock_sonnet.return_value = MOCK_AMIGOS_READY
+            result = await run(state)
+
+        assert isinstance(result.data["signals"], dict)
 
 
 # ── Definition of Done tests ──────────────────────────────────────────────────
@@ -672,8 +783,6 @@ class TestRetryBehaviour:
 
 class TestSchemaContract:
     def test_required_arrays_have_min_items(self):
-        from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
-
         required_arrays = (
             "ba_discussion_points",
             "developer_discussion_points",
@@ -688,16 +797,12 @@ class TestSchemaContract:
             )
 
     def test_regression_affected_areas_has_min_items(self):
-        from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
-
         props = _AMIGOS_TOOL_SCHEMA["properties"]
         assert props["regression_affected_areas"].get("minItems") == 1, (
             "'regression_affected_areas' must have minItems=1 (flat field, not nested)"
         )
 
     def test_regression_impact_assessment_not_nested(self):
-        from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
-
         props = _AMIGOS_TOOL_SCHEMA["properties"]
         assert "regression_impact_assessment" not in props, (
             "regression_impact_assessment must be flattened — "
@@ -705,8 +810,6 @@ class TestSchemaContract:
         )
 
     def test_all_twelve_fields_in_required(self):
-        from src.agents.refinement.agent_55_3_amigos_facilitator import _AMIGOS_TOOL_SCHEMA
-
         expected = {
             "ba_discussion_points", "developer_discussion_points",
             "tester_discussion_points", "open_questions",
@@ -716,3 +819,21 @@ class TestSchemaContract:
             "regression_affected_areas", "regression_risk_level", "regression_notes",
         }
         assert set(_AMIGOS_TOOL_SCHEMA["required"]) == expected
+
+    def test_story_ready_assessment_enum_has_three_values(self):
+        assert _AMIGOS_TOOL_SCHEMA["properties"]["story_ready_assessment"]["enum"] == [
+            "READY", "NEEDS_DISCUSSION", "BLOCKED",
+        ]
+
+    def test_regression_risk_level_enum_has_four_values(self):
+        assert _AMIGOS_TOOL_SCHEMA["properties"]["regression_risk_level"]["enum"] == [
+            "LOW", "MEDIUM", "HIGH", "CRITICAL",
+        ]
+
+    def test_action_item_actor_enum_has_four_values(self):
+        actor_enum = _AMIGOS_TOOL_SCHEMA["properties"]["action_items"]["items"]["properties"]["actor"]["enum"]
+        assert set(actor_enum) == {"BA", "DEV", "QA", "PO"}
+
+    def test_action_item_priority_enum_has_three_values(self):
+        priority_enum = _AMIGOS_TOOL_SCHEMA["properties"]["action_items"]["items"]["properties"]["priority"]["enum"]
+        assert priority_enum == ["MUST", "SHOULD", "COULD"]

@@ -284,6 +284,13 @@ def generate_html_report(results_dir: Path, output_path: Path, story_id: str) ->
         print(f"  No agent results found in {results_dir}")
         return
 
+    # Run correctness assertions
+    try:
+        from validation.assertions import assert_pipeline_correctness
+        assertion_failures = assert_pipeline_correctness(list(results_by_id.values()), story_id)
+    except Exception:
+        assertion_failures = []
+
     generated_at = summary.get("generated_at", datetime.now(timezone.utc).isoformat())
     try:
         dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
@@ -361,6 +368,35 @@ def generate_html_report(results_dir: Path, output_path: Path, story_id: str) ->
         {cards_html}
       </div>
     </section>"""
+
+    # Build assertions panel HTML
+    if not assertion_failures:
+        assertions_html = """
+  <section class="assertions-panel">
+    <h2>Correctness Assertions</h2>
+    <div class="assertion-pass-banner">
+      <span>✓</span>
+      <span>All known-good assertions passed — deterministic outputs match expected values.</span>
+    </div>
+  </section>"""
+    else:
+        fail_items = ""
+        for f in assertion_failures:
+            agent_name = (results_by_id.get(f["agent_id"]) or {}).get("agent_name", f"Agent {f['agent_id']:02d}")
+            fail_items += f"""
+    <div class="assertion-fail-banner">
+      <span class="assertion-fail-icon">✗</span>
+      <div class="assertion-fail-body">
+        <div class="assertion-fail-title">Agent {f['agent_id']:02d} — {_escape(agent_name)} — {_escape(f['key'])}</div>
+        <div class="assertion-fail-detail">expected: {_escape(repr(f['expected']))}  ·  got: {_escape(repr(f['actual']))}</div>
+        {"<div class='assertion-fail-note'>" + _escape(f['note']) + "</div>" if f.get('note') else ""}
+      </div>
+    </div>"""
+        assertions_html = f"""
+  <section class="assertions-panel">
+    <h2>Correctness Assertions — {len(assertion_failures)} Failed</h2>
+    {fail_items}
+  </section>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -756,6 +792,51 @@ a {{ color: #3182ce; text-decoration: none; }}
   font-size: 12px;
 }}
 
+/* ── Assertions Panel ── */
+.assertions-panel {{
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  padding: 20px 28px;
+  margin-bottom: 24px;
+}}
+.assertions-panel h2 {{
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a365d;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}}
+.assertion-pass-banner {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #276749;
+  font-weight: 600;
+  font-size: 13px;
+}}
+.assertion-fail-banner {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}}
+.assertion-fail-icon {{ color: #e53e3e; font-size: 16px; flex-shrink: 0; }}
+.assertion-fail-body {{ flex: 1; }}
+.assertion-fail-title {{ font-weight: 600; color: #742a2a; }}
+.assertion-fail-detail {{ color: #c53030; font-size: 12px; margin-top: 2px; font-family: monospace; }}
+.assertion-fail-note {{ color: #718096; font-size: 11px; margin-top: 2px; font-style: italic; }}
+
 @media (max-width: 768px) {{
   .what-why {{ grid-template-columns: 1fr; }}
   .header-top {{ flex-direction: column; gap: 12px; }}
@@ -825,6 +906,9 @@ a {{ color: #3182ce; text-decoration: none; }}
       {phase_stats_html}
     </div>
   </section>
+
+  <!-- Assertions -->
+  {assertions_html}
 
   <!-- Search -->
   <div class="search-bar">

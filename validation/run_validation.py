@@ -270,17 +270,180 @@ MOCK_PMD_RESULTS = [
     },
 ]
 
+# ── Story 2: FSC-3801 — Quarterly Investment Performance Report ───────────────
+# Happy-path story, MEDIUM FCA (Consumer Duty Outcome 1 — no direct COBS 9).
+# Contrasts with FSC-2417: simpler regulatory tier, report-generation pattern,
+# no Platform Event, new custom object, Scheduled Apex.
+
+SAMPLE_STORY_2 = {
+    "story_id": "FSC-3801",
+    "summary": (
+        "As a Wealth Manager, I want to generate a quarterly investment performance report "
+        "for an FSC client showing portfolio returns against their stated financial goals, "
+        "so that I can evidence Consumer Duty Outcome 1 compliance at the annual suitability review"
+    ),
+    "description": (
+        "## Background\n"
+        "Consumer Duty PS22/9 Outcome 1 (products and services meeting client needs) requires "
+        "firms to demonstrate that investment products are delivering against client objectives. "
+        "Wealth Managers currently compile quarterly performance data manually from three separate "
+        "reports before annual reviews, creating inconsistency in Consumer Duty evidence capture.\n\n"
+        "## Goal\n"
+        "Build a Quarterly Performance Report LWC on the FSC Client 360 page that aggregates "
+        "portfolio returns from FinancialHolding__c records against client goals in FinancialGoal__c. "
+        "Generate a structured PerformanceEvidence__c record that attaches to the annual Consumer "
+        "Duty review audit trail.\n\n"
+        "## Regulatory Context\n"
+        "FCA classification: MEDIUM — Consumer Duty PS22/9 Outcome 1. No direct COBS 9.2 "
+        "suitability calculation. CO advisory review recommended but not mandatory for this tier.\n\n"
+        "## Technical Scope\n"
+        "- New Apex class: PerformanceReportService (queries FinancialHolding__c, FinancialGoal__c)\n"
+        "- LWC component: quarterlyPerformanceReport (embedded on FSC Client 360)\n"
+        "- Custom object: PerformanceEvidence__c (quarterly evidence records)\n"
+        "- New custom field: FinancialAccount.LastPerformanceReviewDate__c\n"
+        "- Scheduled Apex: QuarterlyReportScheduler (auto-generates evidence records quarterly)\n\n"
+        "## Out of Scope\n"
+        "- Real-time performance feed from external portfolio systems\n"
+        "- Changes to the FinancialGoal__c goal-setting flow"
+    ),
+    "status": "In Progress",
+    "issue_type": "Story",
+    "priority": "Medium",
+    "labels": ["Consumer-Duty", "Performance-Reporting", "Sprint-48"],
+    "components": ["FSC-ClientPortfolio", "Apex-Services", "LWC-Dashboard"],
+    "assignee": "priya.sharma@wealthfirm.co.uk",
+    "reporter": "marcus.bell@wealthfirm.co.uk",
+}
+
+SAMPLE_AC_2 = [
+    {
+        "scenario": "View quarterly performance report for a client with active financial goals",
+        "given": [
+            "Given a client has at least one active FinancialGoal__c record with a target return",
+            "And their FinancialHolding__c records have been updated within the current quarter",
+        ],
+        "when": ["When the Wealth Manager opens the Quarterly Performance Report on Client 360"],
+        "then": [
+            "Then a performance summary is displayed showing actual return vs target return per goal",
+            "And the variance (actual minus target) is shown as a percentage with colour coding",
+            "And the report quarter and year are displayed as the report period",
+        ],
+    },
+    {
+        "scenario": "Consumer Duty alert when portfolio return deviates significantly from goal",
+        "given": [
+            "Given a client's portfolio return for the quarter is more than 10 percentage points below their goal target",
+        ],
+        "when": ["When the quarterly performance report is generated or viewed"],
+        "then": [
+            "Then a Consumer Duty review alert is displayed prominently on the report",
+            "And the Wealth Manager is prompted to schedule a suitability review meeting",
+            "And an alert record is created on the client's FinancialAccount for audit purposes",
+        ],
+    },
+    {
+        "scenario": "Generate and store Consumer Duty evidence record after review",
+        "given": [
+            "Given a Wealth Manager has reviewed the quarterly performance report",
+            "And the report shows all goals are within acceptable variance (within 10 percentage points)",
+        ],
+        "when": ["When the Wealth Manager clicks 'Record Evidence' on the performance report"],
+        "then": [
+            "Then a PerformanceEvidence__c record is created with the report date and summary data",
+            "And the evidence record is linked to the client's FinancialAccount and reviewed FinancialGoal__c records",
+            "And the evidence record status is set to COMPLETED for Consumer Duty audit purposes",
+        ],
+    },
+    {
+        "scenario": "Handle client with no financial goals recorded",
+        "given": [
+            "Given a client has no active FinancialGoal__c records on file",
+        ],
+        "when": ["When the Wealth Manager opens the Quarterly Performance Report"],
+        "then": [
+            "Then an informational message is displayed: 'No financial goals recorded for this client'",
+            "And a prompt to initiate a goal-setting session is shown",
+            "And no PerformanceEvidence__c record is created automatically",
+        ],
+    },
+]
+
+MOCK_BRANCH_2 = {
+    "branch_name": "feature/FSC-3801-quarterly-performance-report",
+    "commit_sha": "b7e2d1f4c98a0635f7d4e1b8c2a9f3d0e5c8b1f4",
+    "created_date": "2026-05-18T10:00:00Z",
+    "last_commit_date": "2026-05-23T14:15:00Z",
+    "author_email": "priya.sharma@wealthfirm.co.uk",
+}
+
+MOCK_CHANGED_FILES_2 = [
+    {"file_path": "force-app/main/default/classes/PerformanceReportService.cls",
+     "change_type": "add", "object_type": "ApexClass", "object_name": "PerformanceReportService"},
+    {"file_path": "force-app/main/default/classes/PerformanceReportService.cls-meta.xml",
+     "change_type": "add", "object_type": "ApexClass", "object_name": "PerformanceReportService"},
+    {"file_path": "force-app/main/default/classes/QuarterlyReportScheduler.cls",
+     "change_type": "add", "object_type": "ApexClass", "object_name": "QuarterlyReportScheduler"},
+    {"file_path": "force-app/main/default/classes/QuarterlyReportScheduler.cls-meta.xml",
+     "change_type": "add", "object_type": "ApexClass", "object_name": "QuarterlyReportScheduler"},
+    {"file_path": "force-app/main/default/lwc/quarterlyPerformanceReport/quarterlyPerformanceReport.js",
+     "change_type": "add", "object_type": "LightningComponentBundle", "object_name": "quarterlyPerformanceReport"},
+    {"file_path": "force-app/main/default/lwc/quarterlyPerformanceReport/quarterlyPerformanceReport.html",
+     "change_type": "add", "object_type": "LightningComponentBundle", "object_name": "quarterlyPerformanceReport"},
+    {"file_path": "force-app/main/default/objects/PerformanceEvidence__c/PerformanceEvidence__c.object-meta.xml",
+     "change_type": "add", "object_type": "CustomObject", "object_name": "PerformanceEvidence__c"},
+    {"file_path": "force-app/main/default/objects/FinancialAccount__c/fields/LastPerformanceReviewDate__c.field-meta.xml",
+     "change_type": "add", "object_type": "CustomField", "object_name": "LastPerformanceReviewDate__c"},
+]
+
+MOCK_APEX_RESULTS_2 = {
+    "test_run_id": "7072v000001OBeyAAG",
+    "tests_run": 31,
+    "tests_passed": 31,
+    "tests_failed": 0,
+    "coverage_pct": 84.7,
+    "run_date": "2026-05-23T14:30:00Z",
+}
+
+MOCK_PMD_RESULTS_2 = [
+    {
+        "rule_name": "ApexCRUDViolation", "priority": 3,
+        "description": "Perform CRUD permission check before querying FinancialHolding__c",
+        "file_path": "force-app/main/default/classes/PerformanceReportService.cls",
+        "line": 32, "category": "Security",
+    },
+]
+
+# ── Story registry ────────────────────────────────────────────────────────────
+STORIES: dict[str, dict] = {
+    "FSC-2417": {
+        "story": SAMPLE_STORY,
+        "acs": SAMPLE_AC,
+        "branch": MOCK_BRANCH,
+        "changed_files": MOCK_CHANGED_FILES,
+        "apex_results": MOCK_APEX_RESULTS,
+        "pmd_results": MOCK_PMD_RESULTS,
+    },
+    "FSC-3801": {
+        "story": SAMPLE_STORY_2,
+        "acs": SAMPLE_AC_2,
+        "branch": MOCK_BRANCH_2,
+        "changed_files": MOCK_CHANGED_FILES_2,
+        "apex_results": MOCK_APEX_RESULTS_2,
+        "pmd_results": MOCK_PMD_RESULTS_2,
+    },
+}
+
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
-async def run_agent(agent_id: int, state: dict, patches: list) -> dict:
+async def run_agent(agent_id: int, state: dict, story_data: dict) -> dict:
     """Import and call an agent's run() function. Returns a serialisable result dict."""
     meta = AGENT_META[agent_id]
     module_path = _module_path(agent_id)
 
     try:
         module = importlib.import_module(module_path)
-        with _apply_patches(agent_id, patches):
+        with _apply_patches(agent_id, story_data):
             result = await module.run(state)
         return {
             "agent_id": agent_id,
@@ -307,7 +470,7 @@ async def run_all(story_id: str, output_dir: Path) -> list[dict]:
     """Run all 54 agents in dependency order. Returns list of result dicts."""
     state = initial_story_state(story_id)
     all_results = []
-    patches = _build_patches()
+    story_data = STORIES.get(story_id, STORIES["FSC-2417"])
 
     total_agents = sum(len(batch) for batch in EXECUTION_PLAN)
     done = 0
@@ -322,7 +485,7 @@ async def run_all(story_id: str, output_dir: Path) -> list[dict]:
             agent_id = batch[0]
             _print_agent_start(agent_id, "sequential")
             t0 = time.monotonic()
-            result = await run_agent(agent_id, state, patches)
+            result = await run_agent(agent_id, state, story_data)
             elapsed = int((time.monotonic() - t0) * 1000)
             result["elapsed_ms"] = elapsed
             _print_agent_done(result, elapsed)
@@ -332,7 +495,7 @@ async def run_all(story_id: str, output_dir: Path) -> list[dict]:
         else:
             _print_batch_start(batch)
             t0 = time.monotonic()
-            tasks = [run_agent(aid, state, patches) for aid in batch]
+            tasks = [run_agent(aid, state, story_data) for aid in batch]
             results = await asyncio.gather(*tasks)
             elapsed = int((time.monotonic() - t0) * 1000)
             for result in results:
@@ -401,12 +564,6 @@ def _build_summary(results: list[dict]) -> dict:
     }
 
 
-# ── Patch builders ────────────────────────────────────────────────────────────
-
-def _build_patches() -> list:
-    return []  # patches applied per-agent in _apply_patches
-
-
 from contextlib import contextmanager, ExitStack
 
 
@@ -418,7 +575,7 @@ _COPADO_PATCHES: dict[int, dict[str, object]] = {}  # filled lazily below
 
 
 @contextmanager
-def _apply_patches(agent_id: int, _unused):
+def _apply_patches(agent_id: int, story_data: dict):
     """
     Patch external calls at the agent module level.
 
@@ -429,6 +586,13 @@ def _apply_patches(agent_id: int, _unused):
     module_path = _module_path(agent_id)
     patches_to_apply = []
 
+    story = story_data["story"]
+    acs = story_data["acs"]
+    branch = story_data["branch"]
+    changed_files = story_data["changed_files"]
+    apex_results = story_data["apex_results"]
+    pmd_results = story_data["pmd_results"]
+
     # ── Jira ──────────────────────────────────────────────────────────────────
     if agent_id in _JIRA_AGENTS:
         # Not every jira agent imports both functions — check hasattr first.
@@ -436,21 +600,21 @@ def _apply_patches(agent_id: int, _unused):
         # itself doesn't help; we must check the module before constructing the patch.
         mod = importlib.import_module(module_path)
         for func_name, mock_value in [
-            ("get_story", AsyncMock(return_value=SAMPLE_STORY)),
-            ("get_acceptance_criteria", AsyncMock(return_value=SAMPLE_AC)),
+            ("get_story", AsyncMock(return_value=story)),
+            ("get_acceptance_criteria", AsyncMock(return_value=acs)),
         ]:
             if hasattr(mod, func_name):
                 patches_to_apply.append(patch(f"{module_path}.{func_name}", new=mock_value))
 
     # ── Copado ────────────────────────────────────────────────────────────────
     copado_mocks: dict[str, object] = {
-        11: {"get_branch_for_story": AsyncMock(return_value=MOCK_BRANCH)},
-        12: {"get_apex_test_results": AsyncMock(return_value=MOCK_APEX_RESULTS)},
+        11: {"get_branch_for_story": AsyncMock(return_value=branch)},
+        12: {"get_apex_test_results": AsyncMock(return_value=apex_results)},
         13: {
-            "get_branch_for_story": AsyncMock(return_value=MOCK_BRANCH),
-            "get_changed_files": AsyncMock(return_value=MOCK_CHANGED_FILES),
+            "get_branch_for_story": AsyncMock(return_value=branch),
+            "get_changed_files": AsyncMock(return_value=changed_files),
         },
-        14: {"get_pmd_results": AsyncMock(return_value=MOCK_PMD_RESULTS)},
+        14: {"get_pmd_results": AsyncMock(return_value=pmd_results)},
     }.get(agent_id, {})
 
     for func_name, mock_value in copado_mocks.items():
@@ -590,7 +754,7 @@ def _module_path(agent_id: int) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> None:
+async def _run_story(story_id: str, skip_report: bool, dashboard: bool) -> None:
     t_start = time.monotonic()
     output_dir = OUTPUT_DIR
 
@@ -602,7 +766,7 @@ async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> Non
     scores = [r["confidence"]["final_score"] for r in results if "confidence" in r]
 
     print(f"\n{'=' * 60}")
-    print(f"  Validation Complete")
+    print(f"  Validation Complete — {story_id}")
     print(f"  Agents: {len(results)}  OK: {ok}  Error: {errors}")
     print(f"  Avg confidence: {round(sum(scores)/len(scores), 1) if scores else 0}%")
     print(f"  Total time: {total_ms / 1000:.1f}s")
@@ -637,10 +801,20 @@ async def main(story_id: str, skip_report: bool, dashboard: bool = False) -> Non
         print()
 
 
+async def main(story_id: str, skip_report: bool, dashboard: bool = False, all_stories: bool = False) -> None:
+    if all_stories:
+        for sid in STORIES:
+            await _run_story(sid, skip_report, dashboard)
+    else:
+        await _run_story(story_id, skip_report, dashboard)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--story", default="FSC-2417")
     parser.add_argument("--skip-report", action="store_true")
     parser.add_argument("--dashboard", action="store_true")
+    parser.add_argument("--all-stories", action="store_true",
+                        help="Run validation for all stories in STORIES registry")
     args = parser.parse_args()
-    asyncio.run(main(args.story, args.skip_report, args.dashboard))
+    asyncio.run(main(args.story, args.skip_report, args.dashboard, args.all_stories))

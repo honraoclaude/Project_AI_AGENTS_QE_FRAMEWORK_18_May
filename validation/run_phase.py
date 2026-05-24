@@ -250,6 +250,10 @@ async def main(phase: str, story_id: str, skip_report: bool, seed_dir: Path | No
         generate_html_report(OUTPUT_DIR / run_id, report_path, run_id)
         print(f"  Report: {report_path}\n")
 
+    from validation.generate_dashboard import generate as gen_dashboard
+    gen_dashboard(OUTPUT_DIR)
+    print()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

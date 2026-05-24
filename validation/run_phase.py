@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -120,9 +121,42 @@ def _seed_refinement(story_id: str, story_data: dict) -> dict:
     return state
 
 
+def _seed_from_directory(state: dict, seed_dir: Path) -> dict:
+    """
+    Load prior agent outputs from an existing run directory into state.
+    Use with --seed-from to give later phases full upstream context.
+
+    Example:
+        python -m validation.run_phase --phase testing \\
+               --seed-from validation/outputs/FSC-2417
+    """
+    for f in sorted(seed_dir.glob("agent_*.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            agent_id = data.get("agent_id")
+            if agent_id and data.get("status") == "ok":
+                state["agent_results"][str(agent_id)] = {
+                    "agent_id": agent_id,
+                    "agent_name": data.get("agent_name", ""),
+                    "what": data.get("what", ""),
+                    "why": data.get("why", ""),
+                    "data": data.get("data", {}),
+                    "confidence": data.get("confidence", {}),
+                    "model_used": data.get("model_used", ""),
+                }
+                if agent_id == 3:
+                    fca = data.get("data", {}).get("fca_classification", "")
+                    if fca:
+                        state["fca_classification"] = fca
+        except Exception:
+            pass
+    return state
+
+
 # Each phase seeds from the phase(s) before it.
-# Testing and beyond also need development state, but those agents are seeded
-# incrementally as they run — only the refinement baseline needs pre-loading.
+# For testing/release/monitoring, use --seed-from <prior-run-dir> to supply
+# full upstream context. Without it, only Agent 3 + 5 are pre-seeded and
+# agents that read development outputs will receive empty data gracefully.
 _STATE_SEEDERS: dict[str, object] = {
     "development": _seed_refinement,
     "testing":     _seed_refinement,
@@ -133,9 +167,13 @@ _STATE_SEEDERS: dict[str, object] = {
 
 # ── Phase runner ──────────────────────────────────────────────────────────────
 
-async def run_phase(phase: str, story_id: str, output_dir: Path) -> list[dict]:
+async def run_phase(
+    phase: str, story_id: str, output_dir: Path, seed_dir: Path | None = None
+) -> list[dict]:
     story_data = STORIES.get(story_id, STORIES["FSC-2417"])
     state = _STATE_SEEDERS[phase](story_id, story_data)
+    if seed_dir is not None:
+        _seed_from_directory(state, seed_dir)
     plan = PHASE_PLANS[phase]
     run_id = f"{story_id}_{phase}"
 
@@ -143,11 +181,12 @@ async def run_phase(phase: str, story_id: str, output_dir: Path) -> list[dict]:
     total_agents = sum(len(batch) for batch in plan)
     done = 0
     fca_class = state.get("fca_classification", "?")
+    seed_note = f"  + seeded from {seed_dir}" if seed_dir else ""
 
     print(f"\n{'=' * 60}")
     print(f"  FSC QE Framework -- Phase-Targeted Validation")
     print(f"  Phase: {phase.title()}  |  Story: {story_id}  |  Agents: {total_agents}")
-    print(f"  Seeded state: Agent 3 (FCA={fca_class}) + Agent 5 ({len(story_data['acs'])} ACs)")
+    print(f"  Seeded state: Agent 3 (FCA={fca_class}) + Agent 5 ({len(story_data['acs'])} ACs){seed_note}")
     print(f"{'=' * 60}\n")
 
     for batch in plan:
@@ -183,11 +222,11 @@ async def run_phase(phase: str, story_id: str, output_dir: Path) -> list[dict]:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(phase: str, story_id: str, skip_report: bool) -> None:
+async def main(phase: str, story_id: str, skip_report: bool, seed_dir: Path | None) -> None:
     t_start = time.monotonic()
     run_id = f"{story_id}_{phase}"
 
-    results = await run_phase(phase, story_id, OUTPUT_DIR)
+    results = await run_phase(phase, story_id, OUTPUT_DIR, seed_dir)
 
     total_ms = int((time.monotonic() - t_start) * 1000)
     ok = sum(1 for r in results if r.get("status") == "ok")
@@ -225,5 +264,14 @@ if __name__ == "__main__":
                         help="Story ID (default: FSC-2417)")
     parser.add_argument("--skip-report", action="store_true",
                         help="Skip HTML report generation")
+    parser.add_argument(
+        "--seed-from", metavar="DIR", default=None,
+        help=(
+            "Directory of a prior full-pipeline run to seed upstream state from. "
+            "Required for --phase testing/release to get realistic development context. "
+            "Example: --seed-from validation/outputs/FSC-2417"
+        ),
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.phase, args.story, args.skip_report))
+    seed_dir = Path(args.seed_from) if args.seed_from else None
+    asyncio.run(main(args.phase, args.story, args.skip_report, seed_dir))

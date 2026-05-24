@@ -7,8 +7,10 @@ Saves each agent's output as JSON, then generates an HTML report.
 
 Usage:
     python -m validation.run_validation                    # default story FSC-2417
-    python -m validation.run_validation --story FSC-9001   # custom story id label
+    python -m validation.run_validation --story FSC-3801   # second registered story
+    python -m validation.run_validation --all-stories       # run all registered stories
     python -m validation.run_validation --skip-report       # JSON only
+    python -m validation.run_validation --dashboard         # also regenerate dashboard
 
 Requires:
     ANTHROPIC_API_KEY in .env (or environment) to make live Claude API calls.
@@ -467,7 +469,7 @@ async def run_agent(agent_id: int, state: dict, story_data: dict) -> dict:
 
 
 async def run_all(story_id: str, output_dir: Path) -> list[dict]:
-    """Run all 54 agents in dependency order. Returns list of result dicts."""
+    """Run all 55 agents in dependency order. Returns list of result dicts."""
     state = initial_story_state(story_id)
     all_results = []
     story_data = STORIES.get(story_id, STORIES["FSC-2417"])

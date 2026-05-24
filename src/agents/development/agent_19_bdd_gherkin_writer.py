@@ -139,9 +139,11 @@ async def run(state: StoryState) -> AgentResult:
     agent16_data = _get_agent_data(state, "16")
 
     story = await get_story(story_id)
-    acs = await get_acceptance_criteria(story_id)
+    jira_acs = await get_acceptance_criteria(story_id)
 
     fca_class = (agent3_data or {}).get("fca_classification", "LOW")
+    agent5_clauses = (agent5_data or {}).get("ac_clauses", [])
+    acs = agent5_clauses if agent5_clauses else jira_acs
     ac_count = len(acs)
     refined_ac_count = (agent5_data or {}).get("ac_clause_count", 0)
     compliance_verdict = (agent10_data or {}).get("coverage_verdict", "")
@@ -170,7 +172,7 @@ async def run(state: StoryState) -> AgentResult:
         tool_name=_GHERKIN_TOOL_NAME,
         tool_description="Generate BDD Gherkin scenarios for the story's acceptance criteria.",
         tool_schema=_GHERKIN_TOOL_SCHEMA,
-        max_tokens=2000,
+        max_tokens=4096,
     )
 
     scenarios = result.get("scenarios", [])
@@ -290,7 +292,7 @@ def _build_prompt(
     bulk_risk_factors: list | None = None,
 ) -> str:
     ac_text = "\n".join(
-        f"  AC{i+1}: {ac.get('description', str(ac))}" for i, ac in enumerate(acs)
+        f"  AC{i+1}: {_format_ac_item(ac)}" for i, ac in enumerate(acs)
     ) or "  (no acceptance criteria available)"
 
     vc_line = (
@@ -313,7 +315,7 @@ def _build_prompt(
         f"FCA Classification: {fca_class}\n"
         f"{vc_line}\n"
         f"{bulk_line}\n"
-        f"Acceptance Criteria ({len(acs)} present, {refined_ac_count} expected from refinement):\n"
+        f"Acceptance Criteria ({len(acs)}):\n"
         f"{ac_text}\n"
         f"AC Compliance Verdict: {compliance_verdict or 'N/A'}\n"
         f"Metadata in scope: {objects_in_scope or ['not yet determined']}\n\n"
@@ -322,6 +324,20 @@ def _build_prompt(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _format_ac_item(ac: dict) -> str:
+    """Format a single AC for the prompt — handles both enriched (Agent 5) and raw (Jira) formats."""
+    if "scenario" in ac:
+        lines = [ac["scenario"]]
+        for step in ac.get("given", []):
+            lines.append(f"    {step}")
+        for step in ac.get("when", []):
+            lines.append(f"    {step}")
+        for step in ac.get("then", []):
+            lines.append(f"    {step}")
+        return "\n".join(lines)
+    return ac.get("description", str(ac))
+
 
 def _get_agent_data(state: StoryState, agent_id: str) -> dict | None:
     result = state["agent_results"].get(agent_id)

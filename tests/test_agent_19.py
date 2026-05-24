@@ -7,6 +7,7 @@ import pytest
 from src.agents.development.agent_19_bdd_gherkin_writer import (
     _build_prompt,
     _compute_confidence,
+    _format_ac_item,
     _GHERKIN_TOOL_NAME,
     _GHERKIN_TOOL_SCHEMA,
     run,
@@ -261,6 +262,29 @@ class TestAgentRun:
 
         assert result.data["gherkin_verdict"] == "WARN"
         assert len(result.data["coverage_gaps"]) >= 1
+
+    async def test_max_tokens_is_4096(self):
+        """max_tokens must be 4096 to accommodate 12 enriched AC scenarios."""
+        state = initial_story_state("FSC-2417")
+        captured_kwargs = {}
+
+        async def capture(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MOCK_GHERKIN_PASS
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  side_effect=capture),
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            await run(state)
+
+        assert captured_kwargs.get("max_tokens") == 4096
 
     async def test_uses_default_model(self):
         state = initial_story_state("FSC-2417")
@@ -663,3 +687,194 @@ class TestSchemaContract:
     def test_scenario_item_has_three_required_fields(self):
         item_required = set(_GHERKIN_TOOL_SCHEMA["properties"]["scenarios"]["items"]["required"])
         assert item_required == {"title", "tags", "steps"}
+
+
+# ── AC sourcing: Agent 5 enriched clauses vs Jira fallback ───────────────────
+
+ENRICHED_AC_CLAUSES = [
+    {
+        "scenario": "Scenario: View consolidated suitability score for a fully assessed client",
+        "scenario_type": "happy_path",
+        "given": ["Given a client has a completed Suitability__c record"],
+        "when": ["When the Wealth Adviser opens the suitability-dashboard LWC"],
+        "then": ["Then the consolidated suitability score is displayed"],
+    },
+    {
+        "scenario": "Scenario: COBS 9.2 warning enforced for low suitability score",
+        "scenario_type": "regulatory",
+        "given": ["Given a Retail Client with ConsolidatedSuitabilityScore__c = 43"],
+        "when": ["When the Wealth Adviser attempts to record advice"],
+        "then": ["Then a mandatory COBS 9.2 suitability warning modal is displayed"],
+    },
+]
+
+AGENT5_WITH_CLAUSES = {
+    "ac_clause_count": 2,
+    "ac_clauses": ENRICHED_AC_CLAUSES,
+    "generation_mode": "supplemented_existing",
+    "generation_mode_trust": 0.9,
+}
+
+
+@pytest.mark.asyncio
+class TestAcSourcing:
+    async def test_uses_agent5_clauses_when_available(self):
+        """When Agent 5 has ac_clauses, enriched clauses must appear in the prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": AGENT5_WITH_CLAUSES}
+
+        captured_message = None
+
+        async def capture(**kwargs):
+            nonlocal captured_message
+            captured_message = kwargs.get("user_message", "")
+            return MOCK_GHERKIN_PASS
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  side_effect=capture),
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS  # 3 raw Jira ACs — must NOT appear
+            await run(state)
+
+        assert "Scenario: View consolidated suitability score" in captured_message
+        assert "Scenario: COBS 9.2 warning enforced" in captured_message
+        # Raw Jira AC description must not leak into prompt
+        assert "Given a HIGH-risk client, When suitability check runs" not in captured_message
+
+    async def test_falls_back_to_jira_when_no_agent5_clauses(self):
+        """When Agent 5 has no ac_clauses, Jira ACs must appear in the prompt."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": AGENT5_DATA}  # no ac_clauses
+
+        captured_message = None
+
+        async def capture(**kwargs):
+            nonlocal captured_message
+            captured_message = kwargs.get("user_message", "")
+            return MOCK_GHERKIN_PASS
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  side_effect=capture),
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            await run(state)
+
+        # Jira AC description must appear when falling back
+        assert "Given a HIGH-risk client, When suitability check runs" in captured_message
+
+    async def test_ac_count_reflects_enriched_clauses(self):
+        """result.data['ac_count'] must equal enriched clause count, not Jira count."""
+        state = initial_story_state("FSC-2417")
+        state["agent_results"]["5"] = {"data": AGENT5_WITH_CLAUSES}
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS  # 3 Jira ACs — should be ignored
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert result.data["ac_count"] == 2  # enriched clause count, not 3 (Jira)
+
+    async def test_no_agent5_data_falls_back_to_jira(self):
+        """With no Agent 5 result at all, Jira ACs must be used."""
+        state = initial_story_state("FSC-2417")
+        # No agent 5 in state
+
+        with (
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_story",
+                  new_callable=AsyncMock) as mock_story,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.get_acceptance_criteria",
+                  new_callable=AsyncMock) as mock_acs,
+            patch("src.agents.development.agent_19_bdd_gherkin_writer.call_with_tool",
+                  new_callable=AsyncMock) as mock_sonnet,
+        ):
+            mock_story.return_value = MOCK_STORY
+            mock_acs.return_value = MOCK_ACS
+            mock_sonnet.return_value = MOCK_GHERKIN_PASS
+            result = await run(state)
+
+        assert result.data["ac_count"] == len(MOCK_ACS)
+
+
+# ── _format_ac_item unit tests ────────────────────────────────────────────────
+
+class TestFormatAcItem:
+    def test_enriched_ac_uses_scenario_field(self):
+        ac = {"scenario": "Scenario: Client passes check", "given": [], "when": [], "then": []}
+        assert "Scenario: Client passes check" in _format_ac_item(ac)
+
+    def test_raw_ac_uses_description_field(self):
+        ac = {"id": "AC1", "description": "When X happens, Then Y occurs"}
+        assert _format_ac_item(ac) == "When X happens, Then Y occurs"
+
+    def test_fallback_to_str_when_no_known_key(self):
+        ac = {"id": "AC1", "text": "something"}
+        result = _format_ac_item(ac)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_scenario_takes_precedence_over_description(self):
+        ac = {"scenario": "Scenario: Preferred", "description": "Not preferred"}
+        assert "Scenario: Preferred" in _format_ac_item(ac)
+
+    def test_enriched_ac_includes_given_steps(self):
+        ac = {
+            "scenario": "Scenario: X",
+            "given": ["Given a client exists"],
+            "when": ["When action happens"],
+            "then": ["Then result is correct"],
+        }
+        result = _format_ac_item(ac)
+        assert "Given a client exists" in result
+        assert "When action happens" in result
+        assert "Then result is correct" in result
+
+    def test_enriched_ac_with_empty_steps_just_shows_title(self):
+        ac = {"scenario": "Scenario: Only title", "given": [], "when": [], "then": []}
+        assert _format_ac_item(ac) == "Scenario: Only title"
+
+
+# ── _build_prompt: AC format rendering ───────────────────────────────────────
+
+class TestBuildPromptAcFormat:
+    def test_enriched_acs_render_scenario_title_and_steps(self):
+        enriched = [{
+            "scenario": "Scenario: COBS 9.2 boundary check",
+            "given": ["Given a Retail Client with score 43"],
+            "when": ["When adviser records advice"],
+            "then": ["Then COBS 9.2 warning shown"],
+        }]
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, enriched, "HIGH", 1, "PASS", [])
+        assert "Scenario: COBS 9.2 boundary check" in msg
+        assert "Given a Retail Client with score 43" in msg
+        assert "When adviser records advice" in msg
+        assert "Then COBS 9.2 warning shown" in msg
+
+    def test_raw_acs_render_description_text(self):
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, MOCK_ACS, "HIGH", 3, "PASS", [])
+        assert "Given a HIGH-risk client, When suitability check runs" in msg
+
+    def test_no_count_discrepancy_shown_in_prompt(self):
+        """The old 'X present, Y expected' line that caused INCOMPLETE must be gone."""
+        enriched = ENRICHED_AC_CLAUSES
+        msg = _build_prompt("FSC-2417", _SIMPLE_STORY, enriched, "HIGH", 12, "PASS", [])
+        assert "expected from refinement" not in msg

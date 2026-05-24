@@ -346,7 +346,88 @@ def test_diverse_findings_stores_type_count():
     assert signals["diverse_findings"] == 3
 
 
+def test_critical_weaknesses_found_stores_count():
+    # critical_count=3 → signals["critical_weaknesses_found"] == 3
+    _, signals = _compute_confidence(ac_count=4, survivor_count=2, critical_count=3, findings=[])
+    assert signals["critical_weaknesses_found"] == 3
+
+
+def test_two_weakness_types_no_diverse_findings_signal():
+    # < 3 distinct types → diverse_findings is NOT added
+    findings = [
+        {"weakness_type": "ambiguous_given"},
+        {"weakness_type": "non_observable_then"},
+    ]
+    _, signals = _compute_confidence(ac_count=4, survivor_count=2, critical_count=0, findings=findings)
+    assert "diverse_findings" not in signals
+
+
+def test_sparse_ac_set_no_count_signal():
+    # 1 ≤ ac_count < 4 → none of the three ac-count signals fires
+    _, signals = _compute_confidence(ac_count=2, survivor_count=2, critical_count=0, findings=[])
+    assert "rich_ac_set" not in signals
+    assert "adequate_ac_set" not in signals
+    assert "no_acs_to_challenge" not in signals
+
+
 # ── Tests: integration gaps ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_escalated_when_low_survival_sparse_ac_set():
+    # ac_count=2 → no ac-count signal; survivor_count=0 → low_survival_rate -5
+    # base=60 -5 = 55 < 60 → escalated=True
+    state = _state_with_agent5_clauses(SAMPLE_AC_CLAUSES[:2])
+    mock_result = {
+        "challenge_summary": "Both clauses failed.",
+        "survivor_count": 0,
+        "critical_weakness_count": 0,
+        "challenge_findings": [],
+    }
+    with patch(
+        "src.agents.refinement.agent_05b_ac_challenger.call_with_tool",
+        new_callable=AsyncMock,
+        return_value=mock_result,
+    ):
+        result = await run(state)
+
+    assert result.confidence.escalated is True
+
+
+@pytest.mark.asyncio
+async def test_what_contains_story_id():
+    state = _state_with_agent5_clauses(SAMPLE_AC_CLAUSES)
+    with patch(
+        "src.agents.refinement.agent_05b_ac_challenger.call_with_tool",
+        new_callable=AsyncMock,
+        return_value=MOCK_CHALLENGE_RESULT_NO_FINDINGS,
+    ):
+        result = await run(state)
+
+    assert "FSC-2417" in result.what
+
+
+@pytest.mark.asyncio
+async def test_signals_is_dict_at_run_level():
+    state = _state_with_agent5_clauses(SAMPLE_AC_CLAUSES)
+    with patch(
+        "src.agents.refinement.agent_05b_ac_challenger.call_with_tool",
+        new_callable=AsyncMock,
+        return_value=MOCK_CHALLENGE_RESULT_NO_FINDINGS,
+    ):
+        result = await run(state)
+
+    assert isinstance(result.data["signals"], dict)
+
+
+@pytest.mark.asyncio
+async def test_fca_class_from_state_when_no_agent5():
+    # state["fca_classification"]="HIGH" → used as fallback when agent5 absent
+    state = _state_no_agent5()
+    with patch("src.agents.refinement.agent_05b_ac_challenger.call_with_tool", new_callable=AsyncMock):
+        result = await run(state)
+
+    assert result.data["fca_classification_context"] == "HIGH"
+
 
 @pytest.mark.asyncio
 async def test_model_used_and_tier():
@@ -408,6 +489,17 @@ class TestPromptContent:
         msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
         assert _TOOL_NAME in msg
         assert msg.strip().endswith("challenge_findings.")
+
+    def test_prompt_includes_fca_relevant_field(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        assert "fca_relevant" in msg
+
+    def test_prompt_includes_given_when_then_steps(self):
+        msg = _build_user_message("FSC-2417", "HIGH", SAMPLE_AC_CLAUSES)
+        # All three clause types have given/when/then — spot-check one step from each
+        assert "Given a client has a complete Suitability__c record" in msg
+        assert "When the Wealth Manager opens the suitability-dashboard LWC" in msg
+        assert "Then the ConsolidatedSuitabilityScore__c is displayed between 0 and 100" in msg
 
 
 # ── Tests: schema contract ────────────────────────────────────────────────────
